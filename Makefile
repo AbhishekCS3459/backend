@@ -1,5 +1,8 @@
 .PHONY: help swagger swagger-serve build run run-dev dev stop lint lint-fix fmt vet test test-coverage test-utils bench-utils test-setup check migrate-up migrate-down migrate-create migrate-status docker-up docker-down docker-build clean
 
+# Used by migrate-* if you have not exported DATABASE_URL in this terminal
+DATABASE_URL ?= postgresql://postgres:postgres@localhost:5434/find_me?sslmode=disable
+
 # Default target
 help:
 	@echo "Available commands:"
@@ -258,15 +261,21 @@ db-create:
 		docker compose exec -T postgres psql -U postgres -c "CREATE DATABASE find_me_test;"
 	@echo "✅ Databases find_me and find_me_test are ready"
 
+seed:
+	@echo "Seeding $(DATABASE_URL)"
+	@psql "$(DATABASE_URL)" -v ON_ERROR_STOP=1 -f migrations/seed.sql
+	@echo "✅ Seed complete"
+
 # Database migrations
 migrate-up:
 	@echo "Running migrations..."
-	@if [ -z "$$DATABASE_URL" ]; then echo "❌ DATABASE_URL is not set"; exit 1; fi
-	@migrate -path migrations -database "$$DATABASE_URL" up || (echo "⚠️  Install migrate: go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest" && exit 1)
+	@echo "DATABASE_URL=$(DATABASE_URL)"
+	@migrate -path migrations -database "$(DATABASE_URL)" up || (echo "⚠️  Install migrate: go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest" && exit 1)
 
 migrate-down:
-	@echo "Rolling back migration..."
-	@migrate -path migrations -database "$$DATABASE_URL" down || (echo "⚠️  Install migrate: go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest" && exit 1)
+	@echo "Rolling back $(or $(STEPS),1) migration(s)..."
+	@echo "DATABASE_URL=$(DATABASE_URL)"
+	@migrate -path migrations -database "$(DATABASE_URL)" down $(or $(STEPS),1) || (echo "⚠️  Install migrate: go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest" && exit 1)
 
 migrate-create:
 	@if [ -z "$(NAME)" ]; then echo "❌ Error: NAME is required. Usage: make migrate-create NAME=add_users_table"; exit 1; fi
@@ -274,7 +283,18 @@ migrate-create:
 
 migrate-status:
 	@echo "Migration status:"
-	@migrate -path migrations -database "$$DATABASE_URL" version || (echo "⚠️  Install migrate: go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest" && exit 1)
+	@echo "DATABASE_URL=$(DATABASE_URL)"
+	@out=$$(migrate -path migrations -database "$(DATABASE_URL)" version 2>&1); \
+	code=$$?; \
+	if [ $$code -eq 0 ]; then \
+		echo "$$out"; \
+	elif echo "$$out" | grep -qi "no migration"; then \
+		echo "none applied (database is empty — run make migrate-up)"; \
+	else \
+		echo "$$out"; \
+		echo "⚠️  Install migrate: go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest"; \
+		exit 1; \
+	fi
 
 # Test database setup
 test-setup:

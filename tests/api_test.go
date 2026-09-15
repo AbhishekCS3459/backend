@@ -143,7 +143,7 @@ func TestAuthEndpoints(t *testing.T) {
 		registerReq := models.RegisterRequest{
 			Email:    "test@example.com",
 			Password: "password123",
-			FullName: "Test User",
+			Phone:    "+15550001001",
 		}
 
 		body, _ := json.Marshal(registerReq)
@@ -159,7 +159,7 @@ func TestAuthEndpoints(t *testing.T) {
 		err := json.Unmarshal(w.Body.Bytes(), &response)
 		require.NoError(t, err)
 		assert.Equal(t, registerReq.Email, response.Email)
-		assert.Equal(t, registerReq.FullName, response.FullName)
+		assert.Equal(t, registerReq.Phone, response.Phone)
 		assert.NotEmpty(t, response.ID)
 	})
 
@@ -167,7 +167,7 @@ func TestAuthEndpoints(t *testing.T) {
 		registerReq := models.RegisterRequest{
 			Email:    "duplicate@example.com",
 			Password: "password123",
-			FullName: "First User",
+			Phone:    "+15550001002",
 		}
 
 		body, _ := json.Marshal(registerReq)
@@ -197,15 +197,15 @@ func TestAuthEndpoints(t *testing.T) {
 				name: "missing email",
 				request: models.RegisterRequest{
 					Password: "password123",
-					FullName: "Test User",
+					Phone:    "+15550001001",
 				},
 				want: http.StatusBadRequest,
 			},
 			{
 				name: "missing password",
 				request: models.RegisterRequest{
-					Email:    "test@example.com",
-					FullName: "Test User",
+					Email: "test@example.com",
+					Phone: "+15550001001",
 				},
 				want: http.StatusBadRequest,
 			},
@@ -214,7 +214,7 @@ func TestAuthEndpoints(t *testing.T) {
 				request: models.RegisterRequest{
 					Email:    "test@example.com",
 					Password: "short",
-					FullName: "Test User",
+					Phone:    "+15550001001",
 				},
 				want: http.StatusBadRequest,
 			},
@@ -238,7 +238,7 @@ func TestAuthEndpoints(t *testing.T) {
 		registerReq := models.RegisterRequest{
 			Email:    "login@example.com",
 			Password: "password123",
-			FullName: "Login User",
+			Phone:    "+15550001003",
 		}
 
 		body, _ := json.Marshal(registerReq)
@@ -297,7 +297,7 @@ func TestUserEndpoints(t *testing.T) {
 	registerReq := models.RegisterRequest{
 		Email:    "user@example.com",
 		Password: "password123",
-		FullName: "Test User",
+		Phone:    "+15550001004",
 	}
 
 	body, _ := json.Marshal(registerReq)
@@ -408,7 +408,7 @@ func TestUserEndpoints(t *testing.T) {
 		createReq := models.RegisterRequest{
 			Email:    "newuser@example.com",
 			Password: "password123",
-			FullName: "New User",
+			Phone:    "+15550001005",
 		}
 
 		body, _ := json.Marshal(createReq)
@@ -425,7 +425,7 @@ func TestUserEndpoints(t *testing.T) {
 		createReq := models.RegisterRequest{
 			Email:    "newuser@example.com",
 			Password: "password123",
-			FullName: "New User",
+			Phone:    "+15550001005",
 		}
 
 		body, _ := json.Marshal(createReq)
@@ -442,13 +442,13 @@ func TestUserEndpoints(t *testing.T) {
 		err := json.Unmarshal(w.Body.Bytes(), &user)
 		require.NoError(t, err)
 		assert.Equal(t, createReq.Email, user.Email)
-		assert.Equal(t, createReq.FullName, user.FullName)
+		assert.Equal(t, createReq.Phone, user.Phone)
 	})
 
 	t.Run("update user requires authentication", func(t *testing.T) {
 		updateReq := models.UpdateUserRequest{
-			Email:    "updated@example.com",
-			FullName: "Updated User",
+			Email: "updated@example.com",
+			Phone: "+15550001006",
 		}
 
 		body, _ := json.Marshal(updateReq)
@@ -463,8 +463,8 @@ func TestUserEndpoints(t *testing.T) {
 
 	t.Run("update user with authentication", func(t *testing.T) {
 		updateReq := models.UpdateUserRequest{
-			Email:    "updated@example.com",
-			FullName: "Updated User",
+			Email: "updated@example.com",
+			Phone: "+15550001006",
 		}
 
 		body, _ := json.Marshal(updateReq)
@@ -481,7 +481,7 @@ func TestUserEndpoints(t *testing.T) {
 		err := json.Unmarshal(w.Body.Bytes(), &user)
 		require.NoError(t, err)
 		assert.Equal(t, updateReq.Email, user.Email)
-		assert.Equal(t, updateReq.FullName, user.FullName)
+		assert.Equal(t, updateReq.Phone, user.Phone)
 	})
 
 	t.Run("delete user requires authentication", func(t *testing.T) {

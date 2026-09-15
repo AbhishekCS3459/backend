@@ -3,8 +3,8 @@ package handlers
 import (
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/AbhishekCS3459/find-me-backend/cmd/api/queue"
+	"github.com/go-chi/chi/v5"
 )
 
 // QueueHandler handles queue monitoring and management endpoints

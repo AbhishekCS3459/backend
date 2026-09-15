@@ -84,7 +84,7 @@ Register:
 ```bash
 curl -X POST http://localhost:8080/api/auth/register \
   -H "Content-Type: application/json" \
-  -d '{"email":"user@example.com","password":"password123","full_name":"John Doe"}'
+  -d '{"email":"user@example.com","password":"password123","phone":"+15550001000"}'
 ```
 
 Login:

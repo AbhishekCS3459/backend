@@ -240,7 +240,7 @@ Register:
 ```bash
 curl -X POST http://localhost:8080/api/auth/register \
   -H "Content-Type: application/json" \
-  -d '{"email":"test@example.com","full_name":"Test User","password":"password123"}'
+  -d '{"email":"test@example.com","phone":"+15550001000","password":"password123"}'
 ```
 
 Login:

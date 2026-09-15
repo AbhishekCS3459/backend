@@ -1,4 +1,4 @@
-basePath: /api
+basePath: /
 definitions:
   cmd_api_handlers.ErrorResponse:
     properties:

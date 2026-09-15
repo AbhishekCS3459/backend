@@ -1,0 +1,1 @@
+ALTER TABLE review ALTER COLUMN product_id SET NOT NULL;

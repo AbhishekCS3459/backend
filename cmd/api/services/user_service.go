@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/AbhishekCS3459/find-me-backend/cmd/api/models"
+	"github.com/AbhishekCS3459/find-me-backend/cmd/api/repository"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
-	"github.com/AbhishekCS3459/find-me-backend/cmd/api/models"
-	"github.com/AbhishekCS3459/find-me-backend/cmd/api/repository"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -50,9 +50,10 @@ func (s *UserService) Register(ctx context.Context, req *models.RegisterRequest)
 	user := &models.User{
 		ID:       uuid.New(),
 		Email:    req.Email,
-		FullName: req.FullName,
+		Phone:    req.Phone,
 		Password: string(hashedPassword),
-		Role:     models.RoleUser, // Default role
+		UserType: models.UserTypeUser,
+		Status:   models.UserStatusActive,
 	}
 
 	if err := s.userRepo.Create(ctx, user); err != nil {
@@ -80,7 +81,7 @@ func (s *UserService) Login(ctx context.Context, req *models.LoginRequest) (*mod
 	}
 
 	// Generate JWT token
-	token, err := s.generateToken(user.ID, user.Email, user.Role)
+	token, err := s.generateToken(user.ID, user.Email, user.UserType)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate token: %w", err)
 	}
@@ -110,14 +111,14 @@ func (s *UserService) ListUsers(ctx context.Context, limit, offset int) ([]*mode
 }
 
 // UpdateUser updates a user's information
-func (s *UserService) UpdateUser(ctx context.Context, id uuid.UUID, email, fullName string) (*models.User, error) {
+func (s *UserService) UpdateUser(ctx context.Context, id uuid.UUID, email, phone string) (*models.User, error) {
 	user, err := s.userRepo.FindByID(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 
 	user.Email = email
-	user.FullName = fullName
+	user.Phone = phone
 
 	if err := s.userRepo.Update(ctx, user); err != nil {
 		return nil, err
@@ -185,8 +186,8 @@ func (s *UserService) ValidateToken(tokenString string) (uuid.UUID, string, mode
 	email, _ := claims["email"].(string)
 	roleStr, _ := claims["role"].(string)
 	role := models.UserRole(roleStr)
-	if role != models.RoleAdmin && role != models.RoleUser {
-		role = models.RoleUser // Default to user if invalid
+	if !models.IsValidUserType(role) {
+		role = models.UserTypeUser
 	}
 
 	return userID, email, role, nil
@@ -276,7 +277,7 @@ func (s *UserService) ChangePassword(ctx context.Context, userID uuid.UUID, curr
 }
 
 // BootstrapAdmin creates or promotes the first admin when none exists.
-func (s *UserService) BootstrapAdmin(ctx context.Context, email, password, fullName string) error {
+func (s *UserService) BootstrapAdmin(ctx context.Context, email, password, phone string) error {
 	if email == "" || password == "" {
 		return nil
 	}
@@ -284,7 +285,7 @@ func (s *UserService) BootstrapAdmin(ctx context.Context, email, password, fullN
 		return fmt.Errorf("BOOTSTRAP_ADMIN_PASSWORD must be at least 8 characters")
 	}
 
-	hasAdmin, err := s.userRepo.HasRole(ctx, models.RoleAdmin)
+	hasAdmin, err := s.userRepo.HasRole(ctx, models.UserTypeAdmin)
 	if err != nil {
 		return err
 	}
@@ -295,7 +296,7 @@ func (s *UserService) BootstrapAdmin(ctx context.Context, email, password, fullN
 
 	existing, err := s.userRepo.FindByEmail(ctx, email)
 	if err == nil {
-		if err := s.userRepo.UpdateRole(ctx, existing.ID, models.RoleAdmin); err != nil {
+		if err := s.userRepo.UpdateRole(ctx, existing.ID, models.UserTypeAdmin); err != nil {
 			return err
 		}
 		log.Info().Str("email", email).Msg("promoted existing user to admin")
@@ -310,16 +311,17 @@ func (s *UserService) BootstrapAdmin(ctx context.Context, email, password, fullN
 		return fmt.Errorf("failed to hash bootstrap admin password: %w", err)
 	}
 
-	if fullName == "" {
-		fullName = "Admin"
+	if phone == "" {
+		phone = "+10000000000"
 	}
 
 	user := &models.User{
 		ID:       uuid.New(),
 		Email:    email,
-		FullName: fullName,
+		Phone:    phone,
 		Password: string(hashedPassword),
-		Role:     models.RoleAdmin,
+		UserType: models.UserTypeAdmin,
+		Status:   models.UserStatusActive,
 	}
 	if err := s.userRepo.Create(ctx, user); err != nil {
 		return fmt.Errorf("failed to create bootstrap admin: %w", err)
@@ -329,10 +331,9 @@ func (s *UserService) BootstrapAdmin(ctx context.Context, email, password, fullN
 	return nil
 }
 
-// UpdateUserRole updates a user's role (admin only)
 func (s *UserService) UpdateUserRole(ctx context.Context, targetUserID uuid.UUID, newRole models.UserRole) error {
-	if newRole != models.RoleAdmin && newRole != models.RoleUser {
-		return fmt.Errorf("invalid role")
+	if !models.IsValidUserType(newRole) {
+		return fmt.Errorf("invalid user_type")
 	}
 
 	return s.userRepo.UpdateRole(ctx, targetUserID, newRole)

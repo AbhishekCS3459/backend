@@ -5,14 +5,14 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/google/uuid"
-	"github.com/rs/zerolog/log"
 	"github.com/AbhishekCS3459/find-me-backend/cmd/api/middleware"
 	"github.com/AbhishekCS3459/find-me-backend/cmd/api/models"
 	"github.com/AbhishekCS3459/find-me-backend/cmd/api/repository"
 	"github.com/AbhishekCS3459/find-me-backend/cmd/api/services"
 	"github.com/AbhishekCS3459/find-me-backend/cmd/api/utils"
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+	"github.com/rs/zerolog/log"
 )
 
 // UserHandler handles user-related HTTP requests
@@ -214,7 +214,7 @@ func (h *UserHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := h.userService.UpdateUser(r.Context(), id, req.Email, req.FullName)
+	user, err := h.userService.UpdateUser(r.Context(), id, req.Email, req.Phone)
 	if err != nil {
 		if errors.Is(err, repository.ErrUserNotFound) {
 			respondError(w, http.StatusNotFound, repository.ErrUserNotFoundMsg)
@@ -285,7 +285,7 @@ func (h *UserHandler) UpdateUserRole(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Role string `json:"role" validate:"required"`
+		UserType string `json:"user_type" validate:"required"`
 	}
 
 	if err := decodeJSON(r, &req); err != nil {
@@ -293,20 +293,16 @@ func (h *UserHandler) UpdateUserRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate request
 	if err := utils.ValidateStruct(&req); err != nil {
 		respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	// Validate role value
-	if req.Role != string(models.RoleAdmin) && req.Role != string(models.RoleUser) {
-		respondError(w, http.StatusBadRequest, "role must be 'user' or 'admin'")
+	newRole := models.UserType(req.UserType)
+	if !models.IsValidUserType(newRole) {
+		respondError(w, http.StatusBadRequest, "user_type must be USER, RETAILER, STAFF, or ADMIN")
 		return
 	}
-
-	// Update role
-	newRole := models.UserRole(req.Role)
 	if err := h.userService.UpdateUserRole(r.Context(), id, newRole); err != nil {
 		if errors.Is(err, repository.ErrUserNotFound) {
 			respondError(w, http.StatusNotFound, repository.ErrUserNotFoundMsg)

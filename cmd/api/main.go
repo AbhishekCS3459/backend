@@ -28,7 +28,7 @@ import (
 // @contact.name    Abhishek Kumar Vema
 // @contact.url     https://github.com/AbhishekCS3459
 // @host            localhost:8080
-// @BasePath        /api
+// @BasePath        /
 // @schemes         http https
 // @securityDefinitions.apikey BearerAuth
 // @in header
@@ -58,7 +58,7 @@ func main() {
 	defer db.Close()
 
 	userService := services.NewUserService(repository.NewUserRepository(db.Pool), cfg.JWTSecret)
-	if err := userService.BootstrapAdmin(ctx, cfg.BootstrapAdminEmail, cfg.BootstrapAdminPassword, cfg.BootstrapAdminName); err != nil {
+	if err := userService.BootstrapAdmin(ctx, cfg.BootstrapAdminEmail, cfg.BootstrapAdminPassword, cfg.BootstrapAdminPhone); err != nil {
 		log.Fatal().Err(err).Msg("failed to bootstrap admin user")
 	}
 

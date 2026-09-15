@@ -1,0 +1,9 @@
+CREATE TABLE IF NOT EXISTS brand (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(255) NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_brand_name ON brand (name);
+CREATE INDEX IF NOT EXISTS idx_brand_is_active ON brand (is_active);

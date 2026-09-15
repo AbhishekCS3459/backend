@@ -5,12 +5,12 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/rs/zerolog/log"
 	"github.com/AbhishekCS3459/find-me-backend/cmd/api/middleware"
 	"github.com/AbhishekCS3459/find-me-backend/cmd/api/models"
 	"github.com/AbhishekCS3459/find-me-backend/cmd/api/repository"
 	"github.com/AbhishekCS3459/find-me-backend/cmd/api/services"
 	"github.com/AbhishekCS3459/find-me-backend/cmd/api/utils"
+	"github.com/rs/zerolog/log"
 )
 
 var GetUserID = middleware.GetUserID

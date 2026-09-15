@@ -8,13 +8,13 @@
         "description": "Find Me backend API with PostgreSQL, JWT authentication, and role-based access.\n**Features:**\n- Clean Architecture (Handler-Service-Repository)\n- JWT Authentication\n- Database Migrations\n- OpenAPI Documentation",
         "title": "Find Me API",
         "contact": {
-            "name": "Abhishek Kumar Vema",
+            "name": "Find me",
             "url": "https://github.com/AbhishekCS3459"
         },
         "version": "1.0.0"
     },
     "host": "localhost:8080",
-    "basePath": "/api",
+    "basePath": "/",
     "paths": {
         "/api/admin/queues": {
             "get": {

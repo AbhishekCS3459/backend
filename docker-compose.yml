@@ -1,7 +1,8 @@
 services:
 
   postgres:
-    image: postgres:16-alpine
+    image: postgis/postgis:16-3.5
+    platform: linux/amd64
     container_name: find-me-backend-postgres
     environment:
       POSTGRES_USER: postgres
@@ -16,6 +17,17 @@ services:
       interval: 2s
       timeout: 5s
       retries: 10
+
+  adminer:
+    image: adminer:latest
+    container_name: find-me-backend-adminer
+    ports:
+      - "8081:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
 
   redis:
     image: redis:7-alpine

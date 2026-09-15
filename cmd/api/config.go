@@ -34,7 +34,7 @@ type Config struct {
 	// Bootstrap admin (optional - created on startup if no admin exists)
 	BootstrapAdminEmail    string
 	BootstrapAdminPassword string
-	BootstrapAdminName     string
+	BootstrapAdminPhone    string
 }
 
 // LoadConfig loads configuration from environment variables with validation
@@ -74,7 +74,7 @@ func LoadConfig() (*Config, error) {
 
 	cfg.BootstrapAdminEmail = getEnv("BOOTSTRAP_ADMIN_EMAIL", "")
 	cfg.BootstrapAdminPassword = getEnv("BOOTSTRAP_ADMIN_PASSWORD", "")
-	cfg.BootstrapAdminName = getEnv("BOOTSTRAP_ADMIN_NAME", "Admin")
+	cfg.BootstrapAdminPhone = getEnv("BOOTSTRAP_ADMIN_PHONE", "+10000000000")
 
 	return cfg, nil
 }

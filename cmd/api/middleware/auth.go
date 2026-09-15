@@ -5,10 +5,10 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/google/uuid"
 	"github.com/AbhishekCS3459/find-me-backend/cmd/api/models"
 	"github.com/AbhishekCS3459/find-me-backend/cmd/api/services"
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 )
 
 type contextKey string

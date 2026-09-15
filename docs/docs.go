@@ -10,7 +10,7 @@ const docTemplate = `{
         "description": "{{escape .Description}}",
         "title": "{{.Title}}",
         "contact": {
-            "name": "Abhishek Kumar Vema",
+            "name": "Find Me Swagger",
             "url": "https://github.com/AbhishekCS3459"
         },
         "version": "{{.Version}}"
@@ -1081,7 +1081,7 @@ const docTemplate = `{
 var SwaggerInfo = &swag.Spec{
 	Version:          "1.0.0",
 	Host:             "localhost:8080",
-	BasePath:         "/api",
+	BasePath:         "/",
 	Schemes:          []string{"http", "https"},
 	Title:            "Find Me API",
 	Description:      "Find Me backend API with PostgreSQL, JWT authentication, and role-based access.\n**Features:**\n- Clean Architecture (Handler-Service-Repository)\n- JWT Authentication\n- Database Migrations\n- OpenAPI Documentation",
