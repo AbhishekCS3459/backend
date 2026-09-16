@@ -1,22 +1,22 @@
-package handlers
+package health
 
 import (
 	"context"
 	"net/http"
 	"time"
 
-	"github.com/AbhishekCS3459/find-me-backend/cmd/api/database"
-	"github.com/AbhishekCS3459/find-me-backend/cmd/api/models"
+	"github.com/AbhishekCS3459/find-me-backend/internal/platform/database"
+	"github.com/AbhishekCS3459/find-me-backend/internal/platform/httputil"
 )
 
-// HealthHandler handles health check requests
-type HealthHandler struct {
+// Handler handles health check requests
+type Handler struct {
 	db *database.DB
 }
 
-// NewHealthHandler creates a new health handler
-func NewHealthHandler(db *database.DB) *HealthHandler {
-	return &HealthHandler{db: db}
+// NewHandler creates a new health handler
+func NewHandler(db *database.DB) *Handler {
+	return &Handler{db: db}
 }
 
 // HealthResponse represents the health check response
@@ -44,11 +44,11 @@ var startTime = time.Now()
 // @Tags Health
 // @Accept json
 // @Produce json
-// @Success 200 {object} models.HealthResponse
-// @Failure 503 {object} models.HealthResponse "Service unavailable if database is down"
+// @Success 200 {object} HealthResponse
+// @Failure 503 {object} HealthResponse "Service unavailable if database is down"
 // @Router /api/health [get]
-func (h *HealthHandler) Health(w http.ResponseWriter, r *http.Request) {
-	response := models.HealthResponse{
+func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
+	response := HealthResponse{
 		Status:    "ok",
 		Service:   "find-me-backend",
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
@@ -63,29 +63,28 @@ func (h *HealthHandler) Health(w http.ResponseWriter, r *http.Request) {
 		// If database is unhealthy, return 503
 		if dbHealth.Status != "ok" {
 			response.Status = "degraded"
-			respondJSON(w, http.StatusServiceUnavailable, response)
+			httputil.WriteJSON(w, http.StatusServiceUnavailable, response)
 			return
 		}
 	}
 
-	respondJSON(w, http.StatusOK, response)
+	httputil.WriteJSON(w, http.StatusOK, response)
 }
 
-// checkDatabaseHealth checks the database connection health
-func (h *HealthHandler) checkDatabaseHealth(ctx context.Context) models.DatabaseHealth {
+func (h *Handler) checkDatabaseHealth(ctx context.Context) DatabaseHealth {
 	start := time.Now()
 	err := h.db.Health(ctx)
 	duration := time.Since(start)
 
 	if err != nil {
-		return models.DatabaseHealth{
+		return DatabaseHealth{
 			Status:       "error",
 			ResponseTime: duration.String(),
 			Error:        err.Error(),
 		}
 	}
 
-	return models.DatabaseHealth{
+	return DatabaseHealth{
 		Status:       "ok",
 		ResponseTime: duration.String(),
 	}

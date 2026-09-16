@@ -1,4 +1,4 @@
-package repository
+package identity
 
 import (
 	"context"
@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/AbhishekCS3459/find-me-backend/cmd/api/models"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -29,17 +28,32 @@ const userSelectColumns = `
 	password_reset_token, password_reset_expires_at, created_at, updated_at
 `
 
-type UserRepository struct {
+// Repository is the identity persistence API.
+type Repository interface {
+	Create(ctx context.Context, user *User) error
+	FindByEmail(ctx context.Context, email string) (*User, error)
+	FindByID(ctx context.Context, id uuid.UUID) (*User, error)
+	List(ctx context.Context, limit, offset int) ([]*User, error)
+	Update(ctx context.Context, user *User) error
+	UpdatePassword(ctx context.Context, userID uuid.UUID, hashedPassword string) error
+	SetPasswordResetToken(ctx context.Context, email, token string, expiresAt time.Time) error
+	FindByPasswordResetToken(ctx context.Context, token string) (*User, error)
+	UpdateRole(ctx context.Context, userID uuid.UUID, role UserRole) error
+	HasRole(ctx context.Context, role UserRole) (bool, error)
+	Delete(ctx context.Context, id uuid.UUID) error
+}
+
+type repository struct {
 	db *pgxpool.Pool
 }
 
-func NewUserRepository(db *pgxpool.Pool) *UserRepository {
-	return &UserRepository{db: db}
+func NewRepository(db *pgxpool.Pool) Repository {
+	return &repository{db: db}
 }
 
 func scanUser(scanner interface {
 	Scan(dest ...any) error
-}, user *models.User) error {
+}, user *User) error {
 	return scanner.Scan(
 		&user.ID,
 		&user.Phone,
@@ -55,7 +69,7 @@ func scanUser(scanner interface {
 	)
 }
 
-func (r *UserRepository) Create(ctx context.Context, user *models.User) error {
+func (r *repository) Create(ctx context.Context, user *User) error {
 	query := `
 		INSERT INTO users (id, phone, is_phone_verified, email, password_hash, user_type, status, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
@@ -64,11 +78,11 @@ func (r *UserRepository) Create(ctx context.Context, user *models.User) error {
 	now := time.Now()
 	userType := string(user.UserType)
 	if userType == "" {
-		userType = string(models.UserTypeUser)
+		userType = string(UserTypeUser)
 	}
 	status := string(user.Status)
 	if status == "" {
-		status = string(models.UserStatusActive)
+		status = string(UserStatusActive)
 	}
 
 	err := scanUser(r.db.QueryRow(
@@ -97,9 +111,9 @@ func (r *UserRepository) Create(ctx context.Context, user *models.User) error {
 	return nil
 }
 
-func (r *UserRepository) FindByEmail(ctx context.Context, email string) (*models.User, error) {
+func (r *repository) FindByEmail(ctx context.Context, email string) (*User, error) {
 	query := `SELECT ` + userSelectColumns + ` FROM users WHERE email = $1`
-	user := &models.User{}
+	user := &User{}
 	err := scanUser(r.db.QueryRow(ctx, query, email), user)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -111,9 +125,9 @@ func (r *UserRepository) FindByEmail(ctx context.Context, email string) (*models
 	return user, nil
 }
 
-func (r *UserRepository) FindByID(ctx context.Context, id uuid.UUID) (*models.User, error) {
+func (r *repository) FindByID(ctx context.Context, id uuid.UUID) (*User, error) {
 	query := `SELECT ` + userSelectColumns + ` FROM users WHERE id = $1`
-	user := &models.User{}
+	user := &User{}
 	err := scanUser(r.db.QueryRow(ctx, query, id), user)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -125,7 +139,7 @@ func (r *UserRepository) FindByID(ctx context.Context, id uuid.UUID) (*models.Us
 	return user, nil
 }
 
-func (r *UserRepository) List(ctx context.Context, limit, offset int) ([]*models.User, error) {
+func (r *repository) List(ctx context.Context, limit, offset int) ([]*User, error) {
 	query := `SELECT ` + userSelectColumns + ` FROM users ORDER BY created_at DESC LIMIT $1 OFFSET $2`
 	rows, err := r.db.Query(ctx, query, limit, offset)
 	if err != nil {
@@ -134,9 +148,9 @@ func (r *UserRepository) List(ctx context.Context, limit, offset int) ([]*models
 	}
 	defer rows.Close()
 
-	users := []*models.User{}
+	users := []*User{}
 	for rows.Next() {
-		user := &models.User{}
+		user := &User{}
 		if err := scanUser(rows, user); err != nil {
 			return nil, fmt.Errorf("failed to scan user: %w", err)
 		}
@@ -148,7 +162,7 @@ func (r *UserRepository) List(ctx context.Context, limit, offset int) ([]*models
 	return users, nil
 }
 
-func (r *UserRepository) Update(ctx context.Context, user *models.User) error {
+func (r *repository) Update(ctx context.Context, user *User) error {
 	query := `
 		UPDATE users
 		SET email = $2, phone = $3, updated_at = $4
@@ -167,7 +181,7 @@ func (r *UserRepository) Update(ctx context.Context, user *models.User) error {
 	return nil
 }
 
-func (r *UserRepository) UpdatePassword(ctx context.Context, userID uuid.UUID, hashedPassword string) error {
+func (r *repository) UpdatePassword(ctx context.Context, userID uuid.UUID, hashedPassword string) error {
 	query := `
 		UPDATE users
 		SET password_hash = $2, password_reset_token = NULL, password_reset_expires_at = NULL, updated_at = $3
@@ -187,7 +201,7 @@ func (r *UserRepository) UpdatePassword(ctx context.Context, userID uuid.UUID, h
 	return nil
 }
 
-func (r *UserRepository) SetPasswordResetToken(ctx context.Context, email, token string, expiresAt time.Time) error {
+func (r *repository) SetPasswordResetToken(ctx context.Context, email, token string, expiresAt time.Time) error {
 	query := `
 		UPDATE users
 		SET password_reset_token = $2, password_reset_expires_at = $3, updated_at = $4
@@ -205,11 +219,11 @@ func (r *UserRepository) SetPasswordResetToken(ctx context.Context, email, token
 	return nil
 }
 
-func (r *UserRepository) FindByPasswordResetToken(ctx context.Context, token string) (*models.User, error) {
+func (r *repository) FindByPasswordResetToken(ctx context.Context, token string) (*User, error) {
 	query := `SELECT ` + userSelectColumns + `
 		FROM users
 		WHERE password_reset_token = $1 AND password_reset_expires_at > NOW()`
-	user := &models.User{}
+	user := &User{}
 	err := scanUser(r.db.QueryRow(ctx, query, token), user)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -221,7 +235,7 @@ func (r *UserRepository) FindByPasswordResetToken(ctx context.Context, token str
 	return user, nil
 }
 
-func (r *UserRepository) UpdateRole(ctx context.Context, userID uuid.UUID, role models.UserRole) error {
+func (r *repository) UpdateRole(ctx context.Context, userID uuid.UUID, role UserRole) error {
 	query := `
 		UPDATE users
 		SET user_type = $2, updated_at = $3
@@ -240,7 +254,7 @@ func (r *UserRepository) UpdateRole(ctx context.Context, userID uuid.UUID, role 
 	return nil
 }
 
-func (r *UserRepository) HasRole(ctx context.Context, role models.UserRole) (bool, error) {
+func (r *repository) HasRole(ctx context.Context, role UserRole) (bool, error) {
 	var exists bool
 	err := r.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE user_type = $1)`, string(role)).Scan(&exists)
 	if err != nil {
@@ -249,7 +263,7 @@ func (r *UserRepository) HasRole(ctx context.Context, role models.UserRole) (boo
 	return exists, nil
 }
 
-func (r *UserRepository) Delete(ctx context.Context, id uuid.UUID) error {
+func (r *repository) Delete(ctx context.Context, id uuid.UUID) error {
 	result, err := r.db.Exec(ctx, `DELETE FROM users WHERE id = $1`, id)
 	if err != nil {
 		log.Error().Err(err).Str("id", id.String()).Msg("failed to delete user")

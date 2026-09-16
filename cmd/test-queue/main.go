@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/AbhishekCS3459/find-me-backend/cmd/api/queue"
+	"github.com/AbhishekCS3459/find-me-backend/internal/platform/queue"
 )
 
 type EmailJob struct {

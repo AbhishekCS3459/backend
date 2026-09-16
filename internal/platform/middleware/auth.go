@@ -5,8 +5,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/AbhishekCS3459/find-me-backend/cmd/api/models"
-	"github.com/AbhishekCS3459/find-me-backend/cmd/api/services"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
@@ -17,8 +15,14 @@ const userIDKey contextKey = "user_id"
 const userEmailKey contextKey = "email"
 const userRoleKey contextKey = "role"
 
+// TokenValidator validates a JWT and returns user ID, email, and role.
+// Implemented by the identity service; defined here to avoid an import cycle.
+type TokenValidator interface {
+	ValidateToken(tokenString string) (userID uuid.UUID, email string, role string, err error)
+}
+
 // JWTAuth middleware validates JWT tokens and sets user context
-func JWTAuth(userService *services.UserService, apiAccessToken string) func(http.Handler) http.Handler {
+func JWTAuth(tokens TokenValidator, apiAccessToken string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Check if route is public (no auth required)
@@ -54,7 +58,7 @@ func JWTAuth(userService *services.UserService, apiAccessToken string) func(http
 			token := parts[1]
 
 			// Validate token
-			userID, email, role, err := userService.ValidateToken(token)
+			userID, email, role, err := tokens.ValidateToken(token)
 			if err != nil {
 				http.Error(w, "invalid or expired token", http.StatusUnauthorized)
 				return
@@ -83,8 +87,8 @@ func GetUserEmail(ctx context.Context) (string, bool) {
 }
 
 // GetUserRole extracts the user role from the request context
-func GetUserRole(ctx context.Context) (models.UserRole, bool) {
-	role, ok := ctx.Value(userRoleKey).(models.UserRole)
+func GetUserRole(ctx context.Context) (string, bool) {
+	role, ok := ctx.Value(userRoleKey).(string)
 	return role, ok
 }
 
@@ -92,7 +96,7 @@ func GetUserRole(ctx context.Context) (models.UserRole, bool) {
 func RequireAdmin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		role, ok := GetUserRole(r.Context())
-		if !ok || role != models.RoleAdmin {
+		if !ok || role != "ADMIN" {
 			http.Error(w, "admin access required", http.StatusForbidden)
 			return
 		}
@@ -117,7 +121,7 @@ func RequireOwnerOrAdmin(paramName string) func(http.Handler) http.Handler {
 			role, _ := GetUserRole(r.Context())
 
 			// If admin, allow access to any resource
-			if role == models.RoleAdmin {
+			if role == "ADMIN" {
 				next.ServeHTTP(w, r)
 				return
 			}

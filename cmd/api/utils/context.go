@@ -8,7 +8,7 @@ import (
 )
 
 // Note: This file provides alternative context helpers.
-// The recommended approach is to use middleware.GetUserID() from cmd/api/middleware/auth.go
+// The recommended approach is to use middleware.GetUserID() from internal/platform/middleware/auth.go
 // which is already integrated with the JWT authentication middleware.
 // These functions are provided for cases where you need a different context key or pattern.
 

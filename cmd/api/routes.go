@@ -5,11 +5,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/AbhishekCS3459/find-me-backend/cmd/api/database"
-	"github.com/AbhishekCS3459/find-me-backend/cmd/api/handlers"
-	"github.com/AbhishekCS3459/find-me-backend/cmd/api/middleware"
-	"github.com/AbhishekCS3459/find-me-backend/cmd/api/repository"
-	"github.com/AbhishekCS3459/find-me-backend/cmd/api/services"
+	"github.com/AbhishekCS3459/find-me-backend/internal/identity"
+	"github.com/AbhishekCS3459/find-me-backend/internal/platform/database"
+	"github.com/AbhishekCS3459/find-me-backend/internal/platform/health"
+	"github.com/AbhishekCS3459/find-me-backend/internal/platform/middleware"
 	"github.com/go-chi/chi/v5"
 	chiMiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -55,16 +54,9 @@ func SetupRoutes(db *database.DB, cfg *Config) *chi.Mux {
 		router.Use(middleware.RateLimit(rateLimitConfig))
 	}
 
-	// Initialize repositories
-	userRepo := repository.NewUserRepository(db.Pool)
-
-	// Initialize services
-	userService := services.NewUserService(userRepo, cfg.JWTSecret)
-
-	// Initialize handlers
-	healthHandler := handlers.NewHealthHandler(db)
-	authHandler := handlers.NewAuthHandler(userService)
-	userHandler := handlers.NewUserHandler(userService)
+	userService := identity.NewService(identity.NewRepository(db.Pool), cfg.JWTSecret)
+	healthHandler := health.NewHandler(db)
+	identityHandler := identity.NewHandler(userService)
 
 	// API Routes
 	// Note: API versioning structure ready for expansion
@@ -75,8 +67,7 @@ func SetupRoutes(db *database.DB, cfg *Config) *chi.Mux {
 		// NOTE: Middleware must be defined BEFORE routes in Chi
 		r.Use(middleware.JWTAuth(userService, cfg.APIAccessToken))
 
-		// Health endpoint (public, no auth required - excluded in middleware/auth.go)
-		r.Get("/health", healthHandler.Health)
+		r.Mount("/", healthHandler.Routes())
 
 		// Auth endpoints (public and protected)
 		// Apply stricter rate limiting to auth endpoints to prevent brute force attacks.
@@ -94,30 +85,10 @@ func SetupRoutes(db *database.DB, cfg *Config) *chi.Mux {
 				r.Use(middleware.RateLimit(strictConfig))
 			}
 
-			// Public auth endpoints (no auth required - excluded in middleware/auth.go)
-			r.Post("/register", authHandler.Register)
-			r.Post("/login", authHandler.Login)
-			r.Post("/request-password-reset", authHandler.RequestPasswordReset)
-			r.Post("/reset-password", authHandler.ResetPassword)
-
-			// Protected auth endpoints (require JWT Bearer token)
-			r.Post("/change-password", authHandler.ChangePassword)
+			r.Mount("/", identityHandler.AuthRoutes())
 		})
 
-		r.Route("/users", func(r chi.Router) {
-			// User can access their own profile
-			r.Get("/me", userHandler.GetMe)
-
-			// Admin-only endpoints
-			r.With(middleware.RequireAdmin).Get("/", userHandler.ListUsers)
-			r.With(middleware.RequireAdmin).Post("/", userHandler.CreateUser)
-			r.With(middleware.RequireAdmin).Delete("/{id}", userHandler.DeleteUser)
-			r.With(middleware.RequireAdmin).Put("/{id}/role", userHandler.UpdateUserRole)
-
-			// Owner or admin endpoints (users can access their own, admins can access any)
-			r.With(middleware.RequireOwnerOrAdmin("id")).Get("/{id}", userHandler.GetUser)
-			r.With(middleware.RequireOwnerOrAdmin("id")).Put("/{id}", userHandler.UpdateUser)
-		})
+		r.Mount("/users", identityHandler.UserRoutes())
 
 		// Future: API versioning example
 		// r.Route("/v2", func(r chi.Router) {

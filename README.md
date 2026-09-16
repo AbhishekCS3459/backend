@@ -53,8 +53,8 @@ This repository is a starter template, but the checked-in app is also a function
 
 ### What is present in the repo but not fully integrated into the main app flow
 
-- Queue abstractions and workers under `cmd/api/queue/`
-- Queue admin handlers under `cmd/api/handlers/queue_handler.go`
+- Queue abstractions and workers under `internal/platform/queue/`
+- Queue admin handler in `internal/platform/queue/handler.go`
 - Queue helper CLIs such as `cmd/test-queue` and `cmd/queue-monitor`
 
 The queue packages are real and testable, but the main API server in `cmd/api/main.go` / `cmd/api/routes.go` does **not** currently initialize a queue or mount queue admin routes.
@@ -71,12 +71,20 @@ So the practical compatibility story right now is: local Postgres 18 is recommen
 
 ```text
 cmd/
-  api/              # Main API app
-  queue-monitor/    # Queue inspection CLI
-  test-queue/       # Queue demo/test CLI
-docs/               # Swagger output and supporting guides
-migrations/         # SQL migrations
-tests/              # Integration tests
+  api/                 # Process entry: main.go, config.go, routes.go, utils/
+  queue-monitor/       # Queue inspection CLI
+  test-queue/          # Queue demo/test CLI
+internal/
+  identity/            # users, retailers, retailer_kyc (auth + user API)
+  platform/
+    database/          # pgx pool
+    middleware/        # JWT, CORS, CSP, rate limit
+    queue/             # optional background jobs (not mounted)
+    httputil/          # JSON helpers, validation
+    health/            # GET /api/health
+docs/                  # Swagger output and supporting guides
+migrations/            # SQL migrations
+tests/                 # Integration tests
 ```
 
 ## Prerequisites
@@ -349,3 +357,58 @@ Original starter: [justyn-clark/go-chi-postgres-starter](https://github.com/just
 ## License
 
 MIT — see `LICENSE`.
+
+## Domain-driven package layout
+
+The API is organized by feature under `internal/`, not by layer under `cmd/api/`. `cmd/api` only starts the process, loads config, and mounts each domain’s `Routes()`.
+
+```text
+internal/
+  identity/          → users, retailers, retailer_kyc
+  platform/
+    database/        → pgx pool (moved from cmd/api/database/)
+    middleware/      → JWT, CORS, CSP, rate limit (moved from cmd/api/middleware/)
+    queue/           → optional jobs (moved from cmd/api/queue/; not mounted)
+    httputil/        → JSON write/decode, validation, error body
+    health/          → GET /api/health
+
+cmd/api/
+  main.go            → connect DB, bootstrap admin, listen
+  config.go          → env config
+  routes.go          → chi middleware stack + mount domain routers
+  utils/             → goroutines, pagination (shared helpers, not a domain)
+  errors/            → unused APIError helpers (legacy)
+```
+
+Each domain folder uses the same five files:
+
+| File | Role |
+|---|---|
+| `model.go` | Structs matching this domain’s tables + request/response DTOs |
+| `repository.go` | `Repository` interface + unexported impl (SQL only) |
+| `service.go` | `Service` interface + unexported impl (business rules; depends on this domain’s `Repository`, never another domain’s repo) |
+| `handler.go` | Chi HTTP handlers; calls only `Service` |
+| `routes.go` | `Routes()` (and `AuthRoutes` / `UserRoutes` for identity so `/auth` can keep a stricter rate limit) |
+
+Wiring in `cmd/api`:
+
+```text
+repository → service → handler → handler.Routes() mounted on chi
+```
+
+JWT middleware depends on `middleware.TokenValidator` (implemented by `identity.Service`), not on the identity package directly, so there is no import cycle.
+
+Planned domains (schema exists in `migrations/`; Go packages not added yet):
+
+```text
+internal/
+  store/          → store, store_location, store_hours, store_media, store_kyb
+  staff/          → staff_member
+  catalog/        → category, brand, product, product_variant, product_image
+  inventory/      → inventory
+  order/          → orders, order_item, order_status_history
+  finance/        → retailer_wallet, ledger_entry, settlement, bank_details
+  review/         → review
+  support/        → support_ticket, evidence
+  verification/   → verification_request
+```

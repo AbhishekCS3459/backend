@@ -16,12 +16,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/AbhishekCS3459/find-me-backend/cmd/api/database"
-	"github.com/AbhishekCS3459/find-me-backend/cmd/api/handlers"
-	"github.com/AbhishekCS3459/find-me-backend/cmd/api/middleware"
-	"github.com/AbhishekCS3459/find-me-backend/cmd/api/models"
-	"github.com/AbhishekCS3459/find-me-backend/cmd/api/repository"
-	"github.com/AbhishekCS3459/find-me-backend/cmd/api/services"
+	"github.com/AbhishekCS3459/find-me-backend/internal/identity"
+	"github.com/AbhishekCS3459/find-me-backend/internal/platform/database"
+	"github.com/AbhishekCS3459/find-me-backend/internal/platform/health"
+	"github.com/AbhishekCS3459/find-me-backend/internal/platform/middleware"
 )
 
 // Note: Tests require a test database
@@ -65,17 +63,10 @@ func setupTestRouter(t *testing.T) *chi.Mux {
 	router.Use(chiMiddleware.Compress(5))
 	router.Use(chiMiddleware.Timeout(60 * time.Second))
 
-	// Initialize repositories
-	userRepo := repository.NewUserRepository(testDB.Pool)
-
-	// Initialize services
 	jwtSecret := "test-jwt-secret-for-testing-only"
-	userService := services.NewUserService(userRepo, jwtSecret)
-
-	// Initialize handlers
-	healthHandler := handlers.NewHealthHandler(testDB)
-	authHandler := handlers.NewAuthHandler(userService)
-	userHandler := handlers.NewUserHandler(userService)
+	userService := identity.NewService(identity.NewRepository(testDB.Pool), jwtSecret)
+	healthHandler := health.NewHandler(testDB)
+	identityHandler := identity.NewHandler(userService)
 
 	// API Routes
 	router.Route("/api", func(r chi.Router) {
@@ -84,16 +75,16 @@ func setupTestRouter(t *testing.T) *chi.Mux {
 
 		// Public endpoints
 		r.Get("/health", healthHandler.Health)
-		r.Post("/auth/register", authHandler.Register)
-		r.Post("/auth/login", authHandler.Login)
+		r.Post("/auth/register", identityHandler.Register)
+		r.Post("/auth/login", identityHandler.Login)
 
-		// Protected endpoints
+		// Protected endpoints (same surface as before: no admin gate in this test router)
 		r.Route("/users", func(r chi.Router) {
-			r.Get("/", userHandler.ListUsers)
-			r.Post("/", userHandler.CreateUser)
-			r.Get("/{id}", userHandler.GetUser)
-			r.Put("/{id}", userHandler.UpdateUser)
-			r.Delete("/{id}", userHandler.DeleteUser)
+			r.Get("/", identityHandler.ListUsers)
+			r.Post("/", identityHandler.CreateUser)
+			r.Get("/{id}", identityHandler.GetUser)
+			r.Put("/{id}", identityHandler.UpdateUser)
+			r.Delete("/{id}", identityHandler.DeleteUser)
 		})
 	})
 
@@ -125,7 +116,7 @@ func TestHealthEndpoint(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, w.Code)
 
-		var response models.HealthResponse
+		var response health.HealthResponse
 		err := json.Unmarshal(w.Body.Bytes(), &response)
 		require.NoError(t, err)
 		assert.Equal(t, "ok", response.Status)
@@ -140,7 +131,7 @@ func TestAuthEndpoints(t *testing.T) {
 	defer teardownTest(t)
 
 	t.Run("register new user", func(t *testing.T) {
-		registerReq := models.RegisterRequest{
+		registerReq := identity.RegisterRequest{
 			Email:    "test@example.com",
 			Password: "password123",
 			Phone:    "+15550001001",
@@ -155,7 +146,7 @@ func TestAuthEndpoints(t *testing.T) {
 
 		assert.Equal(t, http.StatusCreated, w.Code)
 
-		var response models.UserResponse
+		var response identity.UserResponse
 		err := json.Unmarshal(w.Body.Bytes(), &response)
 		require.NoError(t, err)
 		assert.Equal(t, registerReq.Email, response.Email)
@@ -164,7 +155,7 @@ func TestAuthEndpoints(t *testing.T) {
 	})
 
 	t.Run("register duplicate email fails", func(t *testing.T) {
-		registerReq := models.RegisterRequest{
+		registerReq := identity.RegisterRequest{
 			Email:    "duplicate@example.com",
 			Password: "password123",
 			Phone:    "+15550001002",
@@ -190,12 +181,12 @@ func TestAuthEndpoints(t *testing.T) {
 	t.Run("register with invalid data fails", func(t *testing.T) {
 		testCases := []struct {
 			name    string
-			request models.RegisterRequest
+			request identity.RegisterRequest
 			want    int
 		}{
 			{
 				name: "missing email",
-				request: models.RegisterRequest{
+				request: identity.RegisterRequest{
 					Password: "password123",
 					Phone:    "+15550001001",
 				},
@@ -203,7 +194,7 @@ func TestAuthEndpoints(t *testing.T) {
 			},
 			{
 				name: "missing password",
-				request: models.RegisterRequest{
+				request: identity.RegisterRequest{
 					Email: "test@example.com",
 					Phone: "+15550001001",
 				},
@@ -211,7 +202,7 @@ func TestAuthEndpoints(t *testing.T) {
 			},
 			{
 				name: "short password",
-				request: models.RegisterRequest{
+				request: identity.RegisterRequest{
 					Email:    "test@example.com",
 					Password: "short",
 					Phone:    "+15550001001",
@@ -235,7 +226,7 @@ func TestAuthEndpoints(t *testing.T) {
 
 	t.Run("login with valid credentials", func(t *testing.T) {
 		// First register a user
-		registerReq := models.RegisterRequest{
+		registerReq := identity.RegisterRequest{
 			Email:    "login@example.com",
 			Password: "password123",
 			Phone:    "+15550001003",
@@ -249,7 +240,7 @@ func TestAuthEndpoints(t *testing.T) {
 		require.Equal(t, http.StatusCreated, w.Code)
 
 		// Now login
-		loginReq := models.LoginRequest{
+		loginReq := identity.LoginRequest{
 			Email:    "login@example.com",
 			Password: "password123",
 		}
@@ -263,7 +254,7 @@ func TestAuthEndpoints(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, w.Code)
 
-		var response models.LoginResponse
+		var response identity.LoginResponse
 		err := json.Unmarshal(w.Body.Bytes(), &response)
 		require.NoError(t, err)
 		assert.NotEmpty(t, response.Token)
@@ -272,7 +263,7 @@ func TestAuthEndpoints(t *testing.T) {
 	})
 
 	t.Run("login with invalid credentials fails", func(t *testing.T) {
-		loginReq := models.LoginRequest{
+		loginReq := identity.LoginRequest{
 			Email:    "nonexistent@example.com",
 			Password: "wrongpassword",
 		}
@@ -294,7 +285,7 @@ func TestUserEndpoints(t *testing.T) {
 	defer teardownTest(t)
 
 	// Register and login to get a token
-	registerReq := models.RegisterRequest{
+	registerReq := identity.RegisterRequest{
 		Email:    "user@example.com",
 		Password: "password123",
 		Phone:    "+15550001004",
@@ -307,13 +298,13 @@ func TestUserEndpoints(t *testing.T) {
 	router.ServeHTTP(w, req)
 	require.Equal(t, http.StatusCreated, w.Code)
 
-	var userResponse models.UserResponse
+	var userResponse identity.UserResponse
 	err := json.Unmarshal(w.Body.Bytes(), &userResponse)
 	require.NoError(t, err)
 	userID := userResponse.ID
 
 	// Login to get token
-	loginReq := models.LoginRequest{
+	loginReq := identity.LoginRequest{
 		Email:    "user@example.com",
 		Password: "password123",
 	}
@@ -325,7 +316,7 @@ func TestUserEndpoints(t *testing.T) {
 	router.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code)
 
-	var loginResponse models.LoginResponse
+	var loginResponse identity.LoginResponse
 	err = json.Unmarshal(w.Body.Bytes(), &loginResponse)
 	require.NoError(t, err)
 	token := loginResponse.Token
@@ -348,7 +339,7 @@ func TestUserEndpoints(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, w.Code)
 
-		var users []models.UserResponse
+		var users []identity.UserResponse
 		err := json.Unmarshal(w.Body.Bytes(), &users)
 		require.NoError(t, err)
 		assert.GreaterOrEqual(t, len(users), 1)
@@ -363,7 +354,7 @@ func TestUserEndpoints(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, w.Code)
 
-		var users []models.UserResponse
+		var users []identity.UserResponse
 		err := json.Unmarshal(w.Body.Bytes(), &users)
 		require.NoError(t, err)
 		assert.LessOrEqual(t, len(users), 5)
@@ -387,7 +378,7 @@ func TestUserEndpoints(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, w.Code)
 
-		var user models.UserResponse
+		var user identity.UserResponse
 		err := json.Unmarshal(w.Body.Bytes(), &user)
 		require.NoError(t, err)
 		assert.Equal(t, userID, user.ID)
@@ -405,7 +396,7 @@ func TestUserEndpoints(t *testing.T) {
 	})
 
 	t.Run("create user requires authentication", func(t *testing.T) {
-		createReq := models.RegisterRequest{
+		createReq := identity.RegisterRequest{
 			Email:    "newuser@example.com",
 			Password: "password123",
 			Phone:    "+15550001005",
@@ -422,7 +413,7 @@ func TestUserEndpoints(t *testing.T) {
 	})
 
 	t.Run("create user with authentication", func(t *testing.T) {
-		createReq := models.RegisterRequest{
+		createReq := identity.RegisterRequest{
 			Email:    "newuser@example.com",
 			Password: "password123",
 			Phone:    "+15550001005",
@@ -438,7 +429,7 @@ func TestUserEndpoints(t *testing.T) {
 
 		assert.Equal(t, http.StatusCreated, w.Code)
 
-		var user models.UserResponse
+		var user identity.UserResponse
 		err := json.Unmarshal(w.Body.Bytes(), &user)
 		require.NoError(t, err)
 		assert.Equal(t, createReq.Email, user.Email)
@@ -446,7 +437,7 @@ func TestUserEndpoints(t *testing.T) {
 	})
 
 	t.Run("update user requires authentication", func(t *testing.T) {
-		updateReq := models.UpdateUserRequest{
+		updateReq := identity.UpdateUserRequest{
 			Email: "updated@example.com",
 			Phone: "+15550001006",
 		}
@@ -462,7 +453,7 @@ func TestUserEndpoints(t *testing.T) {
 	})
 
 	t.Run("update user with authentication", func(t *testing.T) {
-		updateReq := models.UpdateUserRequest{
+		updateReq := identity.UpdateUserRequest{
 			Email: "updated@example.com",
 			Phone: "+15550001006",
 		}
@@ -477,7 +468,7 @@ func TestUserEndpoints(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, w.Code)
 
-		var user models.UserResponse
+		var user identity.UserResponse
 		err := json.Unmarshal(w.Body.Bytes(), &user)
 		require.NoError(t, err)
 		assert.Equal(t, updateReq.Email, user.Email)

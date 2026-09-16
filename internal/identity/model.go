@@ -1,4 +1,4 @@
-package models
+package identity
 
 import (
 	"time"
@@ -55,6 +55,34 @@ func IsValidUserType(t UserType) bool {
 	default:
 		return false
 	}
+}
+
+type KYCStatus string
+
+const (
+	KYCStatusPending  KYCStatus = "PENDING"
+	KYCStatusApproved KYCStatus = "APPROVED"
+	KYCStatusRejected KYCStatus = "REJECTED"
+)
+
+type Retailer struct {
+	ID        uuid.UUID `json:"id" db:"id"`
+	UserID    uuid.UUID `json:"user_id" db:"user_id"`
+	LegalName string    `json:"legal_name" db:"legal_name"`
+	OwnerName string    `json:"owner_name" db:"owner_name"`
+	KYCStatus KYCStatus `json:"kyc_status" db:"kyc_status"`
+	CreatedAt time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
+}
+
+type RetailerKYC struct {
+	ID             uuid.UUID  `json:"id" db:"id"`
+	RetailerID     uuid.UUID  `json:"retailer_id" db:"retailer_id"`
+	IDProofURL     string     `json:"id_proof_url" db:"id_proof_url"`
+	BusinessRegURL string     `json:"business_reg_url" db:"business_reg_url"`
+	Status         KYCStatus  `json:"status" db:"status"`
+	ReviewedBy     *uuid.UUID `json:"reviewed_by,omitempty" db:"reviewed_by"`
+	ReviewedAt     *time.Time `json:"reviewed_at,omitempty" db:"reviewed_at"`
 }
 
 type RegisterRequest struct {
@@ -114,19 +142,4 @@ func (u *User) ToResponse() *UserResponse {
 		CreatedAt:       u.CreatedAt,
 		UpdatedAt:       u.UpdatedAt,
 	}
-}
-
-type HealthResponse struct {
-	Status    string          `json:"status"`
-	Service   string          `json:"service"`
-	Timestamp string          `json:"timestamp"`
-	Database  *DatabaseHealth `json:"database,omitempty"`
-	Version   string          `json:"version,omitempty"`
-	Uptime    string          `json:"uptime,omitempty"`
-}
-
-type DatabaseHealth struct {
-	Status       string `json:"status"`
-	ResponseTime string `json:"response_time,omitempty"`
-	Error        string `json:"error,omitempty"`
 }

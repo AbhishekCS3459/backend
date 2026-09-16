@@ -12,9 +12,8 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
-	"github.com/AbhishekCS3459/find-me-backend/cmd/api/database"
-	"github.com/AbhishekCS3459/find-me-backend/cmd/api/repository"
-	"github.com/AbhishekCS3459/find-me-backend/cmd/api/services"
+	"github.com/AbhishekCS3459/find-me-backend/internal/identity"
+	"github.com/AbhishekCS3459/find-me-backend/internal/platform/database"
 )
 
 // @title           Find Me API
@@ -57,7 +56,7 @@ func main() {
 	}
 	defer db.Close()
 
-	userService := services.NewUserService(repository.NewUserRepository(db.Pool), cfg.JWTSecret)
+	userService := identity.NewService(identity.NewRepository(db.Pool), cfg.JWTSecret)
 	if err := userService.BootstrapAdmin(ctx, cfg.BootstrapAdminEmail, cfg.BootstrapAdminPassword, cfg.BootstrapAdminPhone); err != nil {
 		log.Fatal().Err(err).Msg("failed to bootstrap admin user")
 	}

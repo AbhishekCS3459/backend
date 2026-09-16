@@ -9,7 +9,7 @@ A pluggable queue system for background job processing with Redis and in-memory 
 ## Quick Start
 
 ```go
-import "github.com/AbhishekCS3459/find-me-backend/cmd/api/queue"
+import "github.com/AbhishekCS3459/find-me-backend/internal/platform/queue"
 
 // Initialize queue
 var q queue.Queue
@@ -36,13 +36,13 @@ worker.Start(ctx)
 ### Run All Tests
 
 ```bash
-go test ./cmd/api/queue -v
+go test ./internal/platform/queue -v
 ```
 
 ### Run Demo Flow Test
 
 ```bash
-go test ./cmd/api/queue -v -run TestQueue_DemoFlow
+go test ./internal/platform/queue -v -run TestQueue_DemoFlow
 ```
 
 This demonstrates:
@@ -55,7 +55,7 @@ This demonstrates:
 ### Run Real-World Example
 
 ```bash
-go test ./cmd/api/queue -v -run TestQueue_RealWorldExample
+go test ./internal/platform/queue -v -run TestQueue_RealWorldExample
 ```
 
 This shows a realistic user registration flow with multiple background actions.
@@ -70,7 +70,7 @@ make redis-test
 
 # Or start Redis manually
 make redis-up
-go test ./cmd/api/queue -v -run TestRedisQueue
+go test ./internal/platform/queue -v -run TestRedisQueue
 make redis-down
 ```
 
@@ -81,7 +81,7 @@ make redis-down
 docker run -d -p 6379:6379 --name redis-test redis:7-alpine
 
 # Run tests
-go test ./cmd/api/queue -v -run TestRedisQueue
+go test ./internal/platform/queue -v -run TestRedisQueue
 
 # Stop Redis
 docker stop redis-test && docker rm redis-test
@@ -176,7 +176,7 @@ go build -tags asynq ./cmd/api
 
 ```go
 import (
-    "github.com/AbhishekCS3459/find-me-backend/cmd/api/queue"
+    "github.com/AbhishekCS3459/find-me-backend/internal/platform/queue"
     "github.com/hibiken/asynq"
 )
 

@@ -4,7 +4,7 @@ package queue
 //
 // 1. Initialize queue (in main.go or service initialization):
 //
-//    import "github.com/AbhishekCS3459/find-me-backend/cmd/api/queue"
+//    import "github.com/AbhishekCS3459/find-me-backend/internal/platform/queue"
 //
 //    // Option A: Redis (production)
 //    q, err := queue.NewRedisQueue(cfg.QueueURL)
