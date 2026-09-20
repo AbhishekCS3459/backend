@@ -47,6 +47,8 @@ Requires JWT Bearer auth:
 ### Authenticated user
 
 - `GET /api/users/me`
+- `PATCH /api/users/me`
+- `POST /api/users/me/verify-phone`
 
 ### Owner or admin
 

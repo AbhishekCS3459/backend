@@ -20,6 +20,8 @@ func (h *Handler) AuthRoutes() chi.Router {
 func (h *Handler) UserRoutes() chi.Router {
 	r := chi.NewRouter()
 	r.Get("/me", h.GetMe)
+	r.Patch("/me", h.UpdateMe)
+	r.Post("/me/verify-phone", h.VerifyPhone)
 	r.With(middleware.RequireAdmin).Get("/", h.ListUsers)
 	r.With(middleware.RequireAdmin).Post("/", h.CreateUser)
 	r.With(middleware.RequireAdmin).Delete("/{id}", h.DeleteUser)

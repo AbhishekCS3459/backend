@@ -25,6 +25,7 @@ var (
 
 const userSelectColumns = `
 	id, phone, is_phone_verified, email, password_hash, user_type, status,
+	full_name, avatar_url, city, bio,
 	password_reset_token, password_reset_expires_at, created_at, updated_at
 `
 
@@ -64,6 +65,10 @@ func scanUser(scanner interface {
 		&user.Password,
 		&user.UserType,
 		&user.Status,
+		&user.FullName,
+		&user.AvatarURL,
+		&user.City,
+		&user.Bio,
 		&user.PasswordResetToken,
 		&user.PasswordResetExpiresAt,
 		&user.CreatedAt,
@@ -199,12 +204,25 @@ func (r *repository) List(ctx context.Context, limit, offset int) ([]*User, erro
 func (r *repository) Update(ctx context.Context, user *User) error {
 	query := `
 		UPDATE users
-		SET email = $2, phone = $3, updated_at = $4
+		SET email = $2, phone = $3, full_name = $4, avatar_url = $5, city = $6, bio = $7,
+		    is_phone_verified = $8, updated_at = $9
 		WHERE id = $1
 		RETURNING updated_at
 	`
 	now := time.Now()
-	err := r.db.QueryRow(ctx, query, user.ID, user.Email, user.Phone, now).Scan(&user.UpdatedAt)
+	err := r.db.QueryRow(
+		ctx,
+		query,
+		user.ID,
+		user.Email,
+		user.Phone,
+		user.FullName,
+		user.AvatarURL,
+		user.City,
+		user.Bio,
+		user.IsPhoneVerified,
+		now,
+	).Scan(&user.UpdatedAt)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return ErrUserNotFound

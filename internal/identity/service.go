@@ -20,6 +20,8 @@ type Service interface {
 	GetUser(ctx context.Context, id uuid.UUID) (*User, error)
 	ListUsers(ctx context.Context, limit, offset int) ([]*User, error)
 	UpdateUser(ctx context.Context, id uuid.UUID, email, phone string) (*User, error)
+	UpdateProfile(ctx context.Context, id uuid.UUID, req *UpdateProfileRequest) (*User, error)
+	VerifyPhone(ctx context.Context, id uuid.UUID, otp string) (*User, error)
 	DeleteUser(ctx context.Context, id uuid.UUID) error
 	ValidateToken(tokenString string) (uuid.UUID, string, string, error)
 	RequestPasswordReset(ctx context.Context, email string) error
@@ -119,13 +121,68 @@ func (s *service) UpdateUser(ctx context.Context, id uuid.UUID, email, phone str
 	}
 
 	user.Email = email
-	user.Phone = phone
+	if phone != user.Phone {
+		user.Phone = phone
+		user.IsPhoneVerified = false
+	}
 
 	if err := s.repo.Update(ctx, user); err != nil {
 		return nil, err
 	}
 
 	return user, nil
+}
+
+func (s *service) UpdateProfile(ctx context.Context, id uuid.UUID, req *UpdateProfileRequest) (*User, error) {
+	user, err := s.repo.FindByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	if v := strings.TrimSpace(req.FullName); v != "" {
+		user.FullName = v
+	}
+	if v := strings.TrimSpace(req.AvatarURL); v != "" {
+		user.AvatarURL = v
+	}
+	if v := strings.TrimSpace(req.City); v != "" {
+		user.City = v
+	}
+	if v := strings.TrimSpace(req.Bio); v != "" {
+		user.Bio = v
+	}
+	if phone := strings.TrimSpace(req.Phone); phone != "" && phone != user.Phone {
+		user.Phone = phone
+		user.IsPhoneVerified = false
+	}
+
+	if err := s.repo.Update(ctx, user); err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
+func (s *service) VerifyPhone(ctx context.Context, id uuid.UUID, otp string) (*User, error) {
+	otp = strings.TrimSpace(otp)
+	// Dummy OTP until SMS is wired. Accept 123456 or any 6-digit code.
+	valid := otp == "123456"
+	if !valid && len(otp) == 6 {
+		valid = true
+		for _, ch := range otp {
+			if ch < '0' || ch > '9' {
+				valid = false
+				break
+			}
+		}
+	}
+	if !valid {
+		return nil, fmt.Errorf("invalid otp")
+	}
+
+	if err := s.repo.MarkPhoneVerified(ctx, id); err != nil {
+		return nil, err
+	}
+	return s.repo.FindByID(ctx, id)
 }
 
 func (s *service) DeleteUser(ctx context.Context, id uuid.UUID) error {

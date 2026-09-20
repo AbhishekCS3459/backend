@@ -231,6 +231,92 @@ func (h *Handler) GetMe(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusOK, user.ToResponse())
 }
 
+// UpdateMe updates the authenticated user's profile
+// @Summary Update current user profile
+// @Description Patch the authenticated user's profile fields
+// @Tags Users
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param request body UpdateProfileRequest true "Profile fields"
+// @Success 200 {object} UserResponse
+// @Failure 400 {object} httputil.ErrorResponse
+// @Failure 401 {object} httputil.ErrorResponse
+// @Router /api/users/me [patch]
+func (h *Handler) UpdateMe(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok {
+		httputil.WriteError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+
+	var req UpdateProfileRequest
+	if err := httputil.DecodeJSON(r, &req); err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	user, err := h.svc.UpdateProfile(r.Context(), userID, &req)
+	if err != nil {
+		if errors.Is(err, ErrUserNotFound) {
+			httputil.WriteError(w, http.StatusNotFound, ErrUserNotFoundMsg)
+			return
+		}
+		log.Error().Err(err).Str("id", userID.String()).Msg("failed to update profile")
+		httputil.WriteError(w, http.StatusInternalServerError, "failed to update profile")
+		return
+	}
+
+	httputil.WriteJSON(w, http.StatusOK, user.ToResponse())
+}
+
+// VerifyPhone marks the authenticated user's phone as verified after OTP check
+// @Summary Verify phone with OTP
+// @Description Dummy OTP verification for the current user (accepts 123456 or any 6-digit code)
+// @Tags Users
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param request body VerifyPhoneRequest true "OTP payload"
+// @Success 200 {object} UserResponse
+// @Failure 400 {object} httputil.ErrorResponse
+// @Failure 401 {object} httputil.ErrorResponse
+// @Router /api/users/me/verify-phone [post]
+func (h *Handler) VerifyPhone(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok {
+		httputil.WriteError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+
+	var req VerifyPhoneRequest
+	if err := httputil.DecodeJSON(r, &req); err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := httputil.ValidateStruct(&req); err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	user, err := h.svc.VerifyPhone(r.Context(), userID, req.OTP)
+	if err != nil {
+		if errors.Is(err, ErrUserNotFound) {
+			httputil.WriteError(w, http.StatusNotFound, ErrUserNotFoundMsg)
+			return
+		}
+		if err.Error() == "invalid otp" {
+			httputil.WriteError(w, http.StatusBadRequest, "invalid otp")
+			return
+		}
+		log.Error().Err(err).Str("id", userID.String()).Msg("failed to verify phone")
+		httputil.WriteError(w, http.StatusInternalServerError, "failed to verify phone")
+		return
+	}
+
+	httputil.WriteJSON(w, http.StatusOK, user.ToResponse())
+}
+
 // ListUsers retrieves a list of users (admin only)
 // @Summary List users
 // @Description Get a paginated list of all users (admin only)

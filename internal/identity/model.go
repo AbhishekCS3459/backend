@@ -1,6 +1,7 @@
 package identity
 
 import (
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -38,6 +39,10 @@ type User struct {
 	Password               string     `json:"-" db:"password_hash"`
 	UserType               UserType   `json:"user_type" db:"user_type"`
 	Status                 UserStatus `json:"status" db:"status"`
+	FullName               string     `json:"full_name" db:"full_name"`
+	AvatarURL              string     `json:"avatar_url" db:"avatar_url"`
+	City                   string     `json:"city" db:"city"`
+	Bio                    string     `json:"bio" db:"bio"`
 	PasswordResetToken     *string    `json:"-" db:"password_reset_token"`
 	PasswordResetExpiresAt *time.Time `json:"-" db:"password_reset_expires_at"`
 	CreatedAt              time.Time  `json:"created_at" db:"created_at"`
@@ -106,6 +111,18 @@ type UpdateUserRequest struct {
 	Phone string `json:"phone" validate:"required,min=8"`
 }
 
+type UpdateProfileRequest struct {
+	FullName  string `json:"full_name"`
+	Phone     string `json:"phone"`
+	AvatarURL string `json:"avatar_url"`
+	City      string `json:"city"`
+	Bio       string `json:"bio"`
+}
+
+type VerifyPhoneRequest struct {
+	OTP string `json:"otp" validate:"required,min=4,max=8"`
+}
+
 type PasswordResetRequest struct {
 	Email string `json:"email" validate:"required,email"`
 }
@@ -121,25 +138,56 @@ type ChangePasswordRequest struct {
 }
 
 type UserResponse struct {
-	ID              uuid.UUID `json:"id"`
-	Phone           string    `json:"phone"`
-	IsPhoneVerified bool      `json:"is_phone_verified"`
-	Email           string    `json:"email"`
-	UserType        string    `json:"user_type"`
-	Status          string    `json:"status"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	ID                  uuid.UUID `json:"id"`
+	Phone               string    `json:"phone"`
+	IsPhoneVerified     bool      `json:"is_phone_verified"`
+	Email               string    `json:"email"`
+	UserType            string    `json:"user_type"`
+	Status              string    `json:"status"`
+	FullName            string    `json:"full_name"`
+	AvatarURL           string    `json:"avatar_url"`
+	City                string    `json:"city"`
+	Bio                 string    `json:"bio"`
+	ProfileCompletedPct int       `json:"profile_completed_pct"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
+}
+
+func (u *User) ProfileCompletedPct() int {
+	checks := []bool{
+		strings.TrimSpace(u.Email) != "",
+		strings.TrimSpace(u.Phone) != "",
+		u.IsPhoneVerified,
+		strings.TrimSpace(u.FullName) != "",
+		strings.TrimSpace(u.AvatarURL) != "",
+		strings.TrimSpace(u.City) != "",
+	}
+	done := 0
+	for _, ok := range checks {
+		if ok {
+			done++
+		}
+	}
+	if len(checks) == 0 {
+		return 0
+	}
+	return (done * 100) / len(checks)
 }
 
 func (u *User) ToResponse() *UserResponse {
 	return &UserResponse{
-		ID:              u.ID,
-		Phone:           u.Phone,
-		IsPhoneVerified: u.IsPhoneVerified,
-		Email:           u.Email,
-		UserType:        string(u.UserType),
-		Status:          string(u.Status),
-		CreatedAt:       u.CreatedAt,
-		UpdatedAt:       u.UpdatedAt,
+		ID:                  u.ID,
+		Phone:               u.Phone,
+		IsPhoneVerified:     u.IsPhoneVerified,
+		Email:               u.Email,
+		UserType:            string(u.UserType),
+		Status:              string(u.Status),
+		FullName:            u.FullName,
+		AvatarURL:           u.AvatarURL,
+		City:                u.City,
+		Bio:                 u.Bio,
+		ProfileCompletedPct: u.ProfileCompletedPct(),
+		CreatedAt:           u.CreatedAt,
+		UpdatedAt:           u.UpdatedAt,
 	}
 }
