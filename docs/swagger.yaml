@@ -1,11 +1,11 @@
 basePath: /
 definitions:
-  cmd_api_handlers.ErrorResponse:
+  httputil.ErrorResponse:
     properties:
       error:
         type: string
     type: object
-  models.ChangePasswordRequest:
+  identity.ChangePasswordRequest:
     properties:
       current_password:
         type: string
@@ -16,7 +16,130 @@ definitions:
     - current_password
     - new_password
     type: object
-  models.DatabaseHealth:
+  identity.LoginRequest:
+    properties:
+      email:
+        type: string
+      password:
+        type: string
+    required:
+    - email
+    - password
+    type: object
+  identity.LoginResponse:
+    properties:
+      token:
+        type: string
+      user:
+        $ref: '#/definitions/identity.User'
+    type: object
+  identity.PasswordResetConfirm:
+    properties:
+      password:
+        minLength: 8
+        type: string
+      token:
+        type: string
+    required:
+    - password
+    - token
+    type: object
+  identity.PasswordResetRequest:
+    properties:
+      email:
+        type: string
+    required:
+    - email
+    type: object
+  identity.RegisterRequest:
+    properties:
+      email:
+        type: string
+      password:
+        minLength: 8
+        type: string
+      phone:
+        minLength: 8
+        type: string
+    required:
+    - email
+    - password
+    - phone
+    type: object
+  identity.UpdateUserRequest:
+    properties:
+      email:
+        type: string
+      phone:
+        minLength: 8
+        type: string
+    required:
+    - email
+    - phone
+    type: object
+  identity.User:
+    properties:
+      created_at:
+        type: string
+      email:
+        type: string
+      id:
+        type: string
+      is_phone_verified:
+        type: boolean
+      phone:
+        type: string
+      status:
+        $ref: '#/definitions/identity.UserStatus'
+      updated_at:
+        type: string
+      user_type:
+        $ref: '#/definitions/identity.UserType'
+    type: object
+  identity.UserResponse:
+    properties:
+      created_at:
+        type: string
+      email:
+        type: string
+      id:
+        type: string
+      is_phone_verified:
+        type: boolean
+      phone:
+        type: string
+      status:
+        type: string
+      updated_at:
+        type: string
+      user_type:
+        type: string
+    type: object
+  identity.UserStatus:
+    enum:
+    - ACTIVE
+    - INACTIVE
+    type: string
+    x-enum-varnames:
+    - UserStatusActive
+    - UserStatusInactive
+  identity.UserType:
+    enum:
+    - USER
+    - RETAILER
+    - STAFF
+    - ADMIN
+    - USER
+    - ADMIN
+    type: string
+    x-enum-varnames:
+    - UserTypeUser
+    - UserTypeRetailer
+    - UserTypeStaff
+    - UserTypeAdmin
+    - RoleUser
+    - RoleAdmin
+  health.DatabaseHealth:
     properties:
       error:
         type: string
@@ -25,10 +148,10 @@ definitions:
       status:
         type: string
     type: object
-  models.HealthResponse:
+  health.HealthResponse:
     properties:
       database:
-        $ref: '#/definitions/models.DatabaseHealth'
+        $ref: '#/definitions/health.DatabaseHealth'
       service:
         type: string
       status:
@@ -40,106 +163,7 @@ definitions:
       version:
         type: string
     type: object
-  models.LoginRequest:
-    properties:
-      email:
-        type: string
-      password:
-        type: string
-    required:
-    - email
-    - password
-    type: object
-  models.LoginResponse:
-    properties:
-      token:
-        type: string
-      user:
-        $ref: '#/definitions/models.User'
-    type: object
-  models.PasswordResetConfirm:
-    properties:
-      password:
-        minLength: 8
-        type: string
-      token:
-        type: string
-    required:
-    - password
-    - token
-    type: object
-  models.PasswordResetRequest:
-    properties:
-      email:
-        type: string
-    required:
-    - email
-    type: object
-  models.RegisterRequest:
-    properties:
-      email:
-        type: string
-      full_name:
-        minLength: 1
-        type: string
-      password:
-        minLength: 8
-        type: string
-    required:
-    - email
-    - full_name
-    - password
-    type: object
-  models.UpdateUserRequest:
-    properties:
-      email:
-        type: string
-      full_name:
-        minLength: 1
-        type: string
-    required:
-    - email
-    - full_name
-    type: object
-  models.User:
-    properties:
-      created_at:
-        type: string
-      email:
-        type: string
-      full_name:
-        type: string
-      id:
-        type: string
-      role:
-        $ref: '#/definitions/models.UserRole'
-      updated_at:
-        type: string
-    type: object
-  models.UserResponse:
-    properties:
-      created_at:
-        type: string
-      email:
-        type: string
-      full_name:
-        type: string
-      id:
-        type: string
-      role:
-        type: string
-      updated_at:
-        type: string
-    type: object
-  models.UserRole:
-    enum:
-    - user
-    - admin
-    type: string
-    x-enum-varnames:
-    - RoleUser
-    - RoleAdmin
-  github_com_AbhishekCS3459_find-me-backend_cmd_api_queue.Job:
+  queue.Job:
     properties:
       created_at:
         type: string
@@ -156,19 +180,19 @@ definitions:
       type:
         type: string
     type: object
-  github_com_AbhishekCS3459_find-me-backend_cmd_api_queue.QueueInfo:
+  queue.QueueInfo:
     properties:
       jobs:
         description: First 10 jobs (if peek=true)
         items:
-          $ref: '#/definitions/github_com_AbhishekCS3459_find-me-backend_cmd_api_queue.Job'
+          $ref: '#/definitions/queue.Job'
         type: array
       peeked:
         type: boolean
       stats:
-        $ref: '#/definitions/github_com_AbhishekCS3459_find-me-backend_cmd_api_queue.QueueStats'
+        $ref: '#/definitions/queue.QueueStats'
     type: object
-  github_com_AbhishekCS3459_find-me-backend_cmd_api_queue.QueueStats:
+  queue.QueueStats:
     properties:
       key:
         description: Redis key name
@@ -251,7 +275,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_AbhishekCS3459_find-me-backend_cmd_api_queue.QueueInfo'
+            $ref: '#/definitions/queue.QueueInfo'
         "401":
           description: Unauthorized
           schema:
@@ -292,7 +316,7 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/models.ChangePasswordRequest'
+          $ref: '#/definitions/identity.ChangePasswordRequest'
       produces:
       - application/json
       responses:
@@ -305,11 +329,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/cmd_api_handlers.ErrorResponse'
+            $ref: '#/definitions/httputil.ErrorResponse'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/cmd_api_handlers.ErrorResponse'
+            $ref: '#/definitions/httputil.ErrorResponse'
       security:
       - BearerAuth: []
       summary: Change password
@@ -326,18 +350,18 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/models.LoginRequest'
+          $ref: '#/definitions/identity.LoginRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/models.LoginResponse'
+            $ref: '#/definitions/identity.LoginResponse'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/cmd_api_handlers.ErrorResponse'
+            $ref: '#/definitions/httputil.ErrorResponse'
       summary: Login user
       tags:
       - Authentication
@@ -352,22 +376,22 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/models.RegisterRequest'
+          $ref: '#/definitions/identity.RegisterRequest'
       produces:
       - application/json
       responses:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/models.UserResponse'
+            $ref: '#/definitions/identity.UserResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/cmd_api_handlers.ErrorResponse'
+            $ref: '#/definitions/httputil.ErrorResponse'
         "409":
           description: Conflict
           schema:
-            $ref: '#/definitions/cmd_api_handlers.ErrorResponse'
+            $ref: '#/definitions/httputil.ErrorResponse'
       summary: Register a new user
       tags:
       - Authentication
@@ -382,7 +406,7 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/models.PasswordResetRequest'
+          $ref: '#/definitions/identity.PasswordResetRequest'
       produces:
       - application/json
       responses:
@@ -395,7 +419,7 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/cmd_api_handlers.ErrorResponse'
+            $ref: '#/definitions/httputil.ErrorResponse'
       summary: Request password reset
       tags:
       - Authentication
@@ -410,7 +434,7 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/models.PasswordResetConfirm'
+          $ref: '#/definitions/identity.PasswordResetConfirm'
       produces:
       - application/json
       responses:
@@ -423,11 +447,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/cmd_api_handlers.ErrorResponse'
+            $ref: '#/definitions/httputil.ErrorResponse'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/cmd_api_handlers.ErrorResponse'
+            $ref: '#/definitions/httputil.ErrorResponse'
       summary: Reset password
       tags:
       - Authentication
@@ -442,11 +466,11 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/models.HealthResponse'
+            $ref: '#/definitions/health.HealthResponse'
         "503":
           description: Service unavailable if database is down
           schema:
-            $ref: '#/definitions/models.HealthResponse'
+            $ref: '#/definitions/health.HealthResponse'
       summary: Health check
       tags:
       - Health
@@ -473,16 +497,16 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/models.UserResponse'
+              $ref: '#/definitions/identity.UserResponse'
             type: array
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/cmd_api_handlers.ErrorResponse'
+            $ref: '#/definitions/httputil.ErrorResponse'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/cmd_api_handlers.ErrorResponse'
+            $ref: '#/definitions/httputil.ErrorResponse'
       security:
       - BearerAuth: []
       summary: List users
@@ -498,22 +522,22 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/models.RegisterRequest'
+          $ref: '#/definitions/identity.RegisterRequest'
       produces:
       - application/json
       responses:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/models.UserResponse'
+            $ref: '#/definitions/identity.UserResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/cmd_api_handlers.ErrorResponse'
+            $ref: '#/definitions/httputil.ErrorResponse'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/cmd_api_handlers.ErrorResponse'
+            $ref: '#/definitions/httputil.ErrorResponse'
       security:
       - BearerAuth: []
       summary: Create a new user
@@ -538,15 +562,15 @@ paths:
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/cmd_api_handlers.ErrorResponse'
+            $ref: '#/definitions/httputil.ErrorResponse'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/cmd_api_handlers.ErrorResponse'
+            $ref: '#/definitions/httputil.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/cmd_api_handlers.ErrorResponse'
+            $ref: '#/definitions/httputil.ErrorResponse'
       security:
       - BearerAuth: []
       summary: Delete user
@@ -569,19 +593,19 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/models.UserResponse'
+            $ref: '#/definitions/identity.UserResponse'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/cmd_api_handlers.ErrorResponse'
+            $ref: '#/definitions/httputil.ErrorResponse'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/cmd_api_handlers.ErrorResponse'
+            $ref: '#/definitions/httputil.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/cmd_api_handlers.ErrorResponse'
+            $ref: '#/definitions/httputil.ErrorResponse'
       security:
       - BearerAuth: []
       summary: Get user by ID
@@ -603,30 +627,30 @@ paths:
         name: request
         required: true
         schema:
-          $ref: '#/definitions/models.UpdateUserRequest'
+          $ref: '#/definitions/identity.UpdateUserRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/models.UserResponse'
+            $ref: '#/definitions/identity.UserResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/cmd_api_handlers.ErrorResponse'
+            $ref: '#/definitions/httputil.ErrorResponse'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/cmd_api_handlers.ErrorResponse'
+            $ref: '#/definitions/httputil.ErrorResponse'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/cmd_api_handlers.ErrorResponse'
+            $ref: '#/definitions/httputil.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/cmd_api_handlers.ErrorResponse'
+            $ref: '#/definitions/httputil.ErrorResponse'
       security:
       - BearerAuth: []
       summary: Update user
@@ -657,19 +681,19 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/models.UserResponse'
+            $ref: '#/definitions/identity.UserResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/cmd_api_handlers.ErrorResponse'
+            $ref: '#/definitions/httputil.ErrorResponse'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/cmd_api_handlers.ErrorResponse'
+            $ref: '#/definitions/httputil.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/cmd_api_handlers.ErrorResponse'
+            $ref: '#/definitions/httputil.ErrorResponse'
       security:
       - BearerAuth: []
       summary: Update user role
@@ -686,11 +710,11 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/models.UserResponse'
+            $ref: '#/definitions/identity.UserResponse'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/cmd_api_handlers.ErrorResponse'
+            $ref: '#/definitions/httputil.ErrorResponse'
       security:
       - BearerAuth: []
       summary: Get current user

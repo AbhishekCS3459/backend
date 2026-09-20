@@ -158,6 +158,9 @@ func isPublicRoute(path string) bool {
 		"/api/auth/login",
 		"/api/auth/request-password-reset",
 		"/api/auth/reset-password",
+		"/api/truecaller/start",
+		"/api/truecaller/callback",
+		"/api/truecaller/status",
 		"/swagger",
 	}
 

@@ -32,7 +32,9 @@ const userSelectColumns = `
 type Repository interface {
 	Create(ctx context.Context, user *User) error
 	FindByEmail(ctx context.Context, email string) (*User, error)
+	FindByPhone(ctx context.Context, phone string) (*User, error)
 	FindByID(ctx context.Context, id uuid.UUID) (*User, error)
+	MarkPhoneVerified(ctx context.Context, userID uuid.UUID) error
 	List(ctx context.Context, limit, offset int) ([]*User, error)
 	Update(ctx context.Context, user *User) error
 	UpdatePassword(ctx context.Context, userID uuid.UUID, hashedPassword string) error
@@ -123,6 +125,38 @@ func (r *repository) FindByEmail(ctx context.Context, email string) (*User, erro
 		return nil, fmt.Errorf("failed to find user: %w", err)
 	}
 	return user, nil
+}
+
+func (r *repository) FindByPhone(ctx context.Context, phone string) (*User, error) {
+	query := `SELECT ` + userSelectColumns + ` FROM users WHERE phone = $1`
+	user := &User{}
+	err := scanUser(r.db.QueryRow(ctx, query, phone), user)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, ErrUserNotFound
+		}
+		log.Error().Err(err).Str("phone", phone).Msg("failed to find user by phone")
+		return nil, fmt.Errorf("failed to find user: %w", err)
+	}
+	return user, nil
+}
+
+func (r *repository) MarkPhoneVerified(ctx context.Context, userID uuid.UUID) error {
+	query := `
+		UPDATE users
+		SET is_phone_verified = TRUE, updated_at = $2
+		WHERE id = $1
+		RETURNING updated_at
+	`
+	now := time.Now()
+	err := r.db.QueryRow(ctx, query, userID, now).Scan(&now)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return ErrUserNotFound
+		}
+		return fmt.Errorf("failed to mark phone verified: %w", err)
+	}
+	return nil
 }
 
 func (r *repository) FindByID(ctx context.Context, id uuid.UUID) (*User, error) {

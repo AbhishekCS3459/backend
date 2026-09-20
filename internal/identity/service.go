@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -26,6 +27,7 @@ type Service interface {
 	ChangePassword(ctx context.Context, userID uuid.UUID, currentPassword, newPassword string) error
 	BootstrapAdmin(ctx context.Context, email, password, phone string) error
 	UpdateUserRole(ctx context.Context, targetUserID uuid.UUID, newRole UserRole) error
+	LoginWithVerifiedPhone(ctx context.Context, phone, email string, userType UserType) (*LoginResponse, error)
 }
 
 type service struct {
@@ -304,6 +306,65 @@ func (s *service) BootstrapAdmin(ctx context.Context, email, password, phone str
 
 	log.Info().Str("email", email).Msg("created bootstrap admin user")
 	return nil
+}
+
+func (s *service) LoginWithVerifiedPhone(ctx context.Context, phone, email string, userType UserType) (*LoginResponse, error) {
+	phone = strings.TrimSpace(phone)
+	if phone == "" {
+		return nil, fmt.Errorf("phone is required")
+	}
+	if userType == "" {
+		userType = UserTypeRetailer
+	}
+
+	user, err := s.repo.FindByPhone(ctx, phone)
+	if err == nil {
+		if err := s.repo.MarkPhoneVerified(ctx, user.ID); err != nil {
+			return nil, err
+		}
+		user.IsPhoneVerified = true
+		token, err := s.generateToken(user.ID, user.Email, user.UserType)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate token: %w", err)
+		}
+		return &LoginResponse{Token: token, User: *user}, nil
+	}
+	if !errors.Is(err, ErrUserNotFound) {
+		return nil, err
+	}
+
+	if email == "" {
+		email = fmt.Sprintf("%s@truecaller.todayz.in", strings.TrimPrefix(phone, "+"))
+	}
+
+	if existing, emailErr := s.repo.FindByEmail(ctx, email); emailErr == nil && existing != nil {
+		email = fmt.Sprintf("%s@truecaller.todayz.in", strings.TrimPrefix(phone, "+"))
+	}
+
+	randomPassword := uuid.New().String()
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(randomPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, fmt.Errorf("failed to hash password: %w", err)
+	}
+
+	user = &User{
+		ID:              uuid.New(),
+		Email:           email,
+		Phone:           phone,
+		Password:        string(hashedPassword),
+		UserType:        userType,
+		Status:          UserStatusActive,
+		IsPhoneVerified: true,
+	}
+	if err := s.repo.Create(ctx, user); err != nil {
+		return nil, fmt.Errorf("failed to create user: %w", err)
+	}
+
+	token, err := s.generateToken(user.ID, user.Email, user.UserType)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate token: %w", err)
+	}
+	return &LoginResponse{Token: token, User: *user}, nil
 }
 
 func (s *service) UpdateUserRole(ctx context.Context, targetUserID uuid.UUID, newRole UserRole) error {

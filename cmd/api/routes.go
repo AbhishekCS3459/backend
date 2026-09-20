@@ -9,6 +9,7 @@ import (
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/database"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/health"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/middleware"
+	"github.com/AbhishekCS3459/find-me-backend/internal/truecaller"
 	"github.com/go-chi/chi/v5"
 	chiMiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -33,7 +34,12 @@ func SetupRoutes(db *database.DB, cfg *Config) *chi.Mux {
 	router.Use(chiMiddleware.Timeout(60 * time.Second)) // Request timeout
 
 	corsConfig := &middleware.CORSConfig{
-		AllowedOrigins: []string{"http://localhost:3000", "http://localhost:5173"},
+		AllowedOrigins: []string{
+			"http://localhost:3000",
+			"http://localhost:5173",
+			"https://todayz.in",
+			"https://www.todayz.in",
+		},
 		AllowedMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"},
 		AllowedHeaders: []string{"Content-Type", "Authorization", "X-API-Token"},
 		MaxAge:         3600,
@@ -57,6 +63,7 @@ func SetupRoutes(db *database.DB, cfg *Config) *chi.Mux {
 	userService := identity.NewService(identity.NewRepository(db.Pool), cfg.JWTSecret)
 	healthHandler := health.NewHandler(db)
 	identityHandler := identity.NewHandler(userService)
+	truecallerHandler := truecaller.NewHandler(truecaller.NewService(truecaller.NewStore(cfg.RedisURL), userService))
 
 	// API Routes
 	// Note: API versioning structure ready for expansion
@@ -89,6 +96,7 @@ func SetupRoutes(db *database.DB, cfg *Config) *chi.Mux {
 		})
 
 		r.Mount("/users", identityHandler.UserRoutes())
+		r.Mount("/truecaller", truecallerHandler.Routes())
 
 		// Future: API versioning example
 		// r.Route("/v2", func(r chi.Router) {

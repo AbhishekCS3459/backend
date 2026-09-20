@@ -40,7 +40,12 @@ swagger:
 	@echo "Generating Swagger documentation..."
 	@go run github.com/swaggo/swag/cmd/swag@latest init -g cmd/api/main.go -o ./docs --parseDependency --parseInternal
 	@echo "Fixing model names in swagger.json, swagger.yaml, and docs.go..."
-	@sed -i.bak 's/github_com_AbhishekCS3459_find-me-backend_cmd_api_models\./models./g' docs/swagger.json docs/swagger.yaml docs/docs.go 2>/dev/null && rm -f docs/*.bak || true
+	@sed -i.bak \
+		-e 's/github_com_AbhishekCS3459_find-me-backend_internal_platform_httputil\./httputil./g' \
+		-e 's/github_com_AbhishekCS3459_find-me-backend_cmd_api_models\./models./g' \
+		-e 's/internal_identity\./identity./g' \
+		-e 's/internal_platform_health\./health./g' \
+		docs/swagger.json docs/swagger.yaml docs/docs.go 2>/dev/null && rm -f docs/*.bak || true
 	@echo "✅ Swagger docs generated in ./docs"
 	@echo "Visit http://localhost:8080/swagger/index.html after starting the server"
 

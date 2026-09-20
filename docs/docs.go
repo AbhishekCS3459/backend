@@ -10,7 +10,7 @@ const docTemplate = `{
         "description": "{{escape .Description}}",
         "title": "{{.Title}}",
         "contact": {
-            "name": "Find Me Swagger",
+            "name": "Abhishek Kumar Vema",
             "url": "https://github.com/AbhishekCS3459"
         },
         "version": "{{.Version}}"
@@ -111,7 +111,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_AbhishekCS3459_find-me-backend_cmd_api_queue.QueueInfo"
+                            "$ref": "#/definitions/queue.QueueInfo"
                         }
                     },
                     "401": {
@@ -178,7 +178,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/models.ChangePasswordRequest"
+                            "$ref": "#/definitions/identity.ChangePasswordRequest"
                         }
                     }
                 ],
@@ -195,13 +195,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/cmd_api_handlers.ErrorResponse"
+                            "$ref": "#/definitions/httputil.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/cmd_api_handlers.ErrorResponse"
+                            "$ref": "#/definitions/httputil.ErrorResponse"
                         }
                     }
                 }
@@ -227,7 +227,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/models.LoginRequest"
+                            "$ref": "#/definitions/identity.LoginRequest"
                         }
                     }
                 ],
@@ -235,13 +235,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/models.LoginResponse"
+                            "$ref": "#/definitions/identity.LoginResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/cmd_api_handlers.ErrorResponse"
+                            "$ref": "#/definitions/httputil.ErrorResponse"
                         }
                     }
                 }
@@ -267,7 +267,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/models.RegisterRequest"
+                            "$ref": "#/definitions/identity.RegisterRequest"
                         }
                     }
                 ],
@@ -275,19 +275,19 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/models.UserResponse"
+                            "$ref": "#/definitions/identity.UserResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/cmd_api_handlers.ErrorResponse"
+                            "$ref": "#/definitions/httputil.ErrorResponse"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/cmd_api_handlers.ErrorResponse"
+                            "$ref": "#/definitions/httputil.ErrorResponse"
                         }
                     }
                 }
@@ -313,7 +313,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/models.PasswordResetRequest"
+                            "$ref": "#/definitions/identity.PasswordResetRequest"
                         }
                     }
                 ],
@@ -330,7 +330,7 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/cmd_api_handlers.ErrorResponse"
+                            "$ref": "#/definitions/httputil.ErrorResponse"
                         }
                     }
                 }
@@ -356,7 +356,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/models.PasswordResetConfirm"
+                            "$ref": "#/definitions/identity.PasswordResetConfirm"
                         }
                     }
                 ],
@@ -373,13 +373,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/cmd_api_handlers.ErrorResponse"
+                            "$ref": "#/definitions/httputil.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/cmd_api_handlers.ErrorResponse"
+                            "$ref": "#/definitions/httputil.ErrorResponse"
                         }
                     }
                 }
@@ -402,13 +402,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/models.HealthResponse"
+                            "$ref": "#/definitions/health.HealthResponse"
                         }
                     },
                     "503": {
                         "description": "Service unavailable if database is down",
                         "schema": {
-                            "$ref": "#/definitions/models.HealthResponse"
+                            "$ref": "#/definitions/health.HealthResponse"
                         }
                     }
                 }
@@ -454,20 +454,20 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/models.UserResponse"
+                                "$ref": "#/definitions/identity.UserResponse"
                             }
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/cmd_api_handlers.ErrorResponse"
+                            "$ref": "#/definitions/httputil.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/cmd_api_handlers.ErrorResponse"
+                            "$ref": "#/definitions/httputil.ErrorResponse"
                         }
                     }
                 }
@@ -496,7 +496,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/models.RegisterRequest"
+                            "$ref": "#/definitions/identity.RegisterRequest"
                         }
                     }
                 ],
@@ -504,19 +504,19 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/models.UserResponse"
+                            "$ref": "#/definitions/identity.UserResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/cmd_api_handlers.ErrorResponse"
+                            "$ref": "#/definitions/httputil.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/cmd_api_handlers.ErrorResponse"
+                            "$ref": "#/definitions/httputil.ErrorResponse"
                         }
                     }
                 }
@@ -544,13 +544,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/models.UserResponse"
+                            "$ref": "#/definitions/identity.UserResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/cmd_api_handlers.ErrorResponse"
+                            "$ref": "#/definitions/httputil.ErrorResponse"
                         }
                     }
                 }
@@ -587,25 +587,25 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/models.UserResponse"
+                            "$ref": "#/definitions/identity.UserResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/cmd_api_handlers.ErrorResponse"
+                            "$ref": "#/definitions/httputil.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/cmd_api_handlers.ErrorResponse"
+                            "$ref": "#/definitions/httputil.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/cmd_api_handlers.ErrorResponse"
+                            "$ref": "#/definitions/httputil.ErrorResponse"
                         }
                     }
                 }
@@ -641,7 +641,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/models.UpdateUserRequest"
+                            "$ref": "#/definitions/identity.UpdateUserRequest"
                         }
                     }
                 ],
@@ -649,31 +649,31 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/models.UserResponse"
+                            "$ref": "#/definitions/identity.UserResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/cmd_api_handlers.ErrorResponse"
+                            "$ref": "#/definitions/httputil.ErrorResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/cmd_api_handlers.ErrorResponse"
+                            "$ref": "#/definitions/httputil.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/cmd_api_handlers.ErrorResponse"
+                            "$ref": "#/definitions/httputil.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/cmd_api_handlers.ErrorResponse"
+                            "$ref": "#/definitions/httputil.ErrorResponse"
                         }
                     }
                 }
@@ -711,19 +711,19 @@ const docTemplate = `{
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/cmd_api_handlers.ErrorResponse"
+                            "$ref": "#/definitions/httputil.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/cmd_api_handlers.ErrorResponse"
+                            "$ref": "#/definitions/httputil.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/cmd_api_handlers.ErrorResponse"
+                            "$ref": "#/definitions/httputil.ErrorResponse"
                         }
                     }
                 }
@@ -772,25 +772,25 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/models.UserResponse"
+                            "$ref": "#/definitions/identity.UserResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/cmd_api_handlers.ErrorResponse"
+                            "$ref": "#/definitions/httputil.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/cmd_api_handlers.ErrorResponse"
+                            "$ref": "#/definitions/httputil.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/cmd_api_handlers.ErrorResponse"
+                            "$ref": "#/definitions/httputil.ErrorResponse"
                         }
                     }
                 }
@@ -798,7 +798,7 @@ const docTemplate = `{
         }
     },
     "definitions": {
-        "cmd_api_handlers.ErrorResponse": {
+        "httputil.ErrorResponse": {
             "type": "object",
             "properties": {
                 "error": {
@@ -806,7 +806,7 @@ const docTemplate = `{
                 }
             }
         },
-        "models.ChangePasswordRequest": {
+        "identity.ChangePasswordRequest": {
             "type": "object",
             "required": [
                 "current_password",
@@ -822,7 +822,185 @@ const docTemplate = `{
                 }
             }
         },
-        "models.DatabaseHealth": {
+        "identity.LoginRequest": {
+            "type": "object",
+            "required": [
+                "email",
+                "password"
+            ],
+            "properties": {
+                "email": {
+                    "type": "string"
+                },
+                "password": {
+                    "type": "string"
+                }
+            }
+        },
+        "identity.LoginResponse": {
+            "type": "object",
+            "properties": {
+                "token": {
+                    "type": "string"
+                },
+                "user": {
+                    "$ref": "#/definitions/identity.User"
+                }
+            }
+        },
+        "identity.PasswordResetConfirm": {
+            "type": "object",
+            "required": [
+                "password",
+                "token"
+            ],
+            "properties": {
+                "password": {
+                    "type": "string",
+                    "minLength": 8
+                },
+                "token": {
+                    "type": "string"
+                }
+            }
+        },
+        "identity.PasswordResetRequest": {
+            "type": "object",
+            "required": [
+                "email"
+            ],
+            "properties": {
+                "email": {
+                    "type": "string"
+                }
+            }
+        },
+        "identity.RegisterRequest": {
+            "type": "object",
+            "required": [
+                "email",
+                "password",
+                "phone"
+            ],
+            "properties": {
+                "email": {
+                    "type": "string"
+                },
+                "password": {
+                    "type": "string",
+                    "minLength": 8
+                },
+                "phone": {
+                    "type": "string",
+                    "minLength": 8
+                }
+            }
+        },
+        "identity.UpdateUserRequest": {
+            "type": "object",
+            "required": [
+                "email",
+                "phone"
+            ],
+            "properties": {
+                "email": {
+                    "type": "string"
+                },
+                "phone": {
+                    "type": "string",
+                    "minLength": 8
+                }
+            }
+        },
+        "identity.User": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "email": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "is_phone_verified": {
+                    "type": "boolean"
+                },
+                "phone": {
+                    "type": "string"
+                },
+                "status": {
+                    "$ref": "#/definitions/identity.UserStatus"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user_type": {
+                    "$ref": "#/definitions/identity.UserType"
+                }
+            }
+        },
+        "identity.UserResponse": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "email": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "is_phone_verified": {
+                    "type": "boolean"
+                },
+                "phone": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user_type": {
+                    "type": "string"
+                }
+            }
+        },
+        "identity.UserStatus": {
+            "type": "string",
+            "enum": [
+                "ACTIVE",
+                "INACTIVE"
+            ],
+            "x-enum-varnames": [
+                "UserStatusActive",
+                "UserStatusInactive"
+            ]
+        },
+        "identity.UserType": {
+            "type": "string",
+            "enum": [
+                "USER",
+                "RETAILER",
+                "STAFF",
+                "ADMIN",
+                "USER",
+                "ADMIN"
+            ],
+            "x-enum-varnames": [
+                "UserTypeUser",
+                "UserTypeRetailer",
+                "UserTypeStaff",
+                "UserTypeAdmin",
+                "RoleUser",
+                "RoleAdmin"
+            ]
+        },
+        "health.DatabaseHealth": {
             "type": "object",
             "properties": {
                 "error": {
@@ -836,11 +1014,11 @@ const docTemplate = `{
                 }
             }
         },
-        "models.HealthResponse": {
+        "health.HealthResponse": {
             "type": "object",
             "properties": {
                 "database": {
-                    "$ref": "#/definitions/models.DatabaseHealth"
+                    "$ref": "#/definitions/health.DatabaseHealth"
                 },
                 "service": {
                     "type": "string"
@@ -859,154 +1037,7 @@ const docTemplate = `{
                 }
             }
         },
-        "models.LoginRequest": {
-            "type": "object",
-            "required": [
-                "email",
-                "password"
-            ],
-            "properties": {
-                "email": {
-                    "type": "string"
-                },
-                "password": {
-                    "type": "string"
-                }
-            }
-        },
-        "models.LoginResponse": {
-            "type": "object",
-            "properties": {
-                "token": {
-                    "type": "string"
-                },
-                "user": {
-                    "$ref": "#/definitions/models.User"
-                }
-            }
-        },
-        "models.PasswordResetConfirm": {
-            "type": "object",
-            "required": [
-                "password",
-                "token"
-            ],
-            "properties": {
-                "password": {
-                    "type": "string",
-                    "minLength": 8
-                },
-                "token": {
-                    "type": "string"
-                }
-            }
-        },
-        "models.PasswordResetRequest": {
-            "type": "object",
-            "required": [
-                "email"
-            ],
-            "properties": {
-                "email": {
-                    "type": "string"
-                }
-            }
-        },
-        "models.RegisterRequest": {
-            "type": "object",
-            "required": [
-                "email",
-                "full_name",
-                "password"
-            ],
-            "properties": {
-                "email": {
-                    "type": "string"
-                },
-                "full_name": {
-                    "type": "string",
-                    "minLength": 1
-                },
-                "password": {
-                    "type": "string",
-                    "minLength": 8
-                }
-            }
-        },
-        "models.UpdateUserRequest": {
-            "type": "object",
-            "required": [
-                "email",
-                "full_name"
-            ],
-            "properties": {
-                "email": {
-                    "type": "string"
-                },
-                "full_name": {
-                    "type": "string",
-                    "minLength": 1
-                }
-            }
-        },
-        "models.User": {
-            "type": "object",
-            "properties": {
-                "created_at": {
-                    "type": "string"
-                },
-                "email": {
-                    "type": "string"
-                },
-                "full_name": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "role": {
-                    "$ref": "#/definitions/models.UserRole"
-                },
-                "updated_at": {
-                    "type": "string"
-                }
-            }
-        },
-        "models.UserResponse": {
-            "type": "object",
-            "properties": {
-                "created_at": {
-                    "type": "string"
-                },
-                "email": {
-                    "type": "string"
-                },
-                "full_name": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "role": {
-                    "type": "string"
-                },
-                "updated_at": {
-                    "type": "string"
-                }
-            }
-        },
-        "models.UserRole": {
-            "type": "string",
-            "enum": [
-                "user",
-                "admin"
-            ],
-            "x-enum-varnames": [
-                "RoleUser",
-                "RoleAdmin"
-            ]
-        },
-        "github_com_AbhishekCS3459_find-me-backend_cmd_api_queue.Job": {
+        "queue.Job": {
             "type": "object",
             "properties": {
                 "created_at": {
@@ -1032,25 +1063,25 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_AbhishekCS3459_find-me-backend_cmd_api_queue.QueueInfo": {
+        "queue.QueueInfo": {
             "type": "object",
             "properties": {
                 "jobs": {
                     "description": "First 10 jobs (if peek=true)",
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_AbhishekCS3459_find-me-backend_cmd_api_queue.Job"
+                        "$ref": "#/definitions/queue.Job"
                     }
                 },
                 "peeked": {
                     "type": "boolean"
                 },
                 "stats": {
-                    "$ref": "#/definitions/github_com_AbhishekCS3459_find-me-backend_cmd_api_queue.QueueStats"
+                    "$ref": "#/definitions/queue.QueueStats"
                 }
             }
         },
-        "github_com_AbhishekCS3459_find-me-backend_cmd_api_queue.QueueStats": {
+        "queue.QueueStats": {
             "type": "object",
             "properties": {
                 "key": {

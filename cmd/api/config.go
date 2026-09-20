@@ -31,6 +31,9 @@ type Config struct {
 	// Queue (optional - for background job processing)
 	QueueURL string // Redis URL or empty for in-memory queue
 
+	// Redis (optional - Truecaller session cache; falls back to memory)
+	RedisURL string
+
 	// Bootstrap admin (optional - created on startup if no admin exists)
 	BootstrapAdminEmail    string
 	BootstrapAdminPassword string
@@ -71,6 +74,7 @@ func LoadConfig() (*Config, error) {
 
 	// Queue (optional - Redis URL for production, empty for in-memory in development)
 	cfg.QueueURL = getEnv("QUEUE_URL", "")
+	cfg.RedisURL = getEnv("REDIS_URL", cfg.QueueURL)
 
 	cfg.BootstrapAdminEmail = getEnv("BOOTSTRAP_ADMIN_EMAIL", "")
 	cfg.BootstrapAdminPassword = getEnv("BOOTSTRAP_ADMIN_PASSWORD", "")
