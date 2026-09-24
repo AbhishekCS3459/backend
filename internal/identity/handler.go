@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/AbhishekCS3459/find-me-backend/internal/identity/retailer"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/httputil"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/middleware"
 	"github.com/go-chi/chi/v5"
@@ -14,11 +15,12 @@ import (
 
 // Handler handles identity HTTP requests (auth + users).
 type Handler struct {
-	svc Service
+	svc       Service
+	retailers retailer.Service
 }
 
-func NewHandler(svc Service) *Handler {
-	return &Handler{svc: svc}
+func NewHandler(svc Service, retailers retailer.Service) *Handler {
+	return &Handler{svc: svc, retailers: retailers}
 }
 
 // Register handles user registration
@@ -228,7 +230,24 @@ func (h *Handler) GetMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	httputil.WriteJSON(w, http.StatusOK, user.ToResponse())
+	me := user.ToResponse()
+	var retailerProfile *retailer.Profile
+	if h.retailers != nil {
+		found, lookupErr := h.retailers.GetMine(r.Context(), userID)
+		if lookupErr != nil && !errors.Is(lookupErr, retailer.ErrNotFound) {
+			log.Error().Err(lookupErr).Str("id", userID.String()).Msg("failed to load retailer profile")
+			httputil.WriteError(w, http.StatusInternalServerError, "failed to get user")
+			return
+		}
+		if lookupErr == nil {
+			retailerProfile = found
+		}
+	}
+
+	httputil.WriteJSON(w, http.StatusOK, struct {
+		*UserResponse
+		Retailer *retailer.Profile `json:"retailer"`
+	}{me, retailerProfile})
 }
 
 // UpdateMe updates the authenticated user's profile

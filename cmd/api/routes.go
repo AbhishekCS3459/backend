@@ -5,10 +5,15 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/AbhishekCS3459/find-me-backend/internal/catalog"
 	"github.com/AbhishekCS3459/find-me-backend/internal/identity"
+	"github.com/AbhishekCS3459/find-me-backend/internal/identity/progress"
+	"github.com/AbhishekCS3459/find-me-backend/internal/identity/retailer"
+	"github.com/AbhishekCS3459/find-me-backend/internal/listproducts"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/database"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/health"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/middleware"
+	"github.com/AbhishekCS3459/find-me-backend/internal/stores"
 	"github.com/AbhishekCS3459/find-me-backend/internal/truecaller"
 	"github.com/go-chi/chi/v5"
 	chiMiddleware "github.com/go-chi/chi/v5/middleware"
@@ -62,7 +67,14 @@ func SetupRoutes(db *database.DB, cfg *Config) *chi.Mux {
 
 	userService := identity.NewService(identity.NewRepository(db.Pool), cfg.JWTSecret)
 	healthHandler := health.NewHandler(db)
-	identityHandler := identity.NewHandler(userService)
+	retailerRepo := retailer.NewRepository(db.Gorm)
+	retailerService := retailer.NewService(retailerRepo)
+	identityHandler := identity.NewHandler(userService, retailerService)
+	retailerHandler := retailer.NewHandler(retailerService)
+	progressHandler := progress.NewHandler(progress.NewService(progress.NewRepository(db.Gorm)))
+	categoryHandler := catalog.NewHandler(catalog.NewService(catalog.NewRepository(db.Gorm)))
+	storeHandler := stores.NewHandler(stores.NewService(stores.NewRepository(db.Gorm), retailerRepo))
+	listProductsHandler := listproducts.NewHandler(listproducts.NewService(listproducts.NewRepository(db.Gorm), retailerRepo))
 	truecallerHandler := truecaller.NewHandler(truecaller.NewService(truecaller.NewStore(cfg.RedisURL), userService))
 
 	// API Routes
@@ -96,6 +108,13 @@ func SetupRoutes(db *database.DB, cfg *Config) *chi.Mux {
 		})
 
 		r.Mount("/users", identityHandler.UserRoutes())
+		r.Mount("/retailers", retailerHandler.Routes())
+		r.Mount("/user_progress", progressHandler.Routes())
+		r.Mount("/categories", categoryHandler.Routes())
+		r.Route("/stores/{storeID}/products", func(r chi.Router) {
+			r.Mount("/", listProductsHandler.Routes())
+		})
+		r.Mount("/stores", storeHandler.Routes())
 		r.Mount("/truecaller", truecallerHandler.Routes())
 
 		// Future: API versioning example

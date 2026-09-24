@@ -1,0 +1,2 @@
+ALTER TABLE bank_details
+    ADD COLUMN IF NOT EXISTS qr_url TEXT NOT NULL DEFAULT '';
