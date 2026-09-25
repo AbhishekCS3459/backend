@@ -1,0 +1,108 @@
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  AZURE_RESOURCE_GROUP: todayz-app
+  AZURE_WEBAPP_NAME: find-me-api
+  ACR_NAME: todayzacr
+  IMAGE_NAME: find-me-api
+  POSTGRES_SERVER: todays-database-dev
+  MIGRATE_VERSION: v4.18.3
+  HEALTH_URL: https://find-me-api.azurewebsites.net/api/health
+
+jobs:
+  deploy:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Resolve image tag
+        run: |
+          TAG=$(git rev-parse --short=12 HEAD)
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          echo "IMAGE=${ACR_NAME}.azurecr.io/${IMAGE_NAME}:${TAG}" >> "$GITHUB_ENV"
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build and push image
+        run: az acr build --registry "$ACR_NAME" --image "${IMAGE_NAME}:${TAG}" --image "${IMAGE_NAME}:latest" .
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: false
+
+      - name: Install migrate
+        run: go install -tags 'postgres' "github.com/golang-migrate/migrate/v4/cmd/migrate@${MIGRATE_VERSION}"
+
+      - name: Allow this runner through the Postgres firewall
+        run: |
+          RUNNER_IP=$(curl -fsS https://api.ipify.org)
+          RULE_NAME="gha-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "RULE_NAME=$RULE_NAME" >> "$GITHUB_ENV"
+          az postgres flexible-server firewall-rule create \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --server-name "$POSTGRES_SERVER" \
+            --name "$RULE_NAME" \
+            --start-ip-address "$RUNNER_IP" \
+            --end-ip-address "$RUNNER_IP" \
+            --output none
+
+      - name: Run database migrations
+        env:
+          DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
+        run: migrate -path migrations -database "$DATABASE_URL" up
+
+      - name: Remove runner firewall rule
+        if: always() && env.RULE_NAME != ''
+        run: |
+          az postgres flexible-server firewall-rule delete \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --server-name "$POSTGRES_SERVER" \
+            --name "$RULE_NAME" \
+            --yes
+
+      - name: Deploy container to App Service
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ env.AZURE_WEBAPP_NAME }}
+          images: ${{ env.IMAGE }}
+
+      - name: Health check
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl -fsS "$HEALTH_URL"; then
+              echo
+              echo "Healthy after $attempt attempt(s)"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Health check failed: $HEALTH_URL"
+          exit 1

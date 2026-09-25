@@ -1,8 +1,11 @@
 .PHONY: help swagger swagger-serve build run run-dev dev stop lint lint-fix fmt vet test test-coverage test-utils bench-utils test-setup check migrate-up migrate-down migrate-create migrate-status docker-up docker-down docker-build clean
 
-# Used by migrate-* if you have not exported DATABASE_URL in this terminal
-DATABASE_URL ?= postgresql://postgres:postgres@localhost:5434/find_me?sslmode=disable
+# Local development database 
+DEV_DATABASE_URL=postgresql://postgres:postgres@localhost:5434/find_me?sslmode=disable
+# Production database # Set this in your shell:
 
+# export PROD_DATABASE_URL='postgresql://user:password@host:5432/database?sslmode=require'
+PROD_DATABASE_URL ?=
 # Default target
 help:
 	@echo "Available commands:"
@@ -23,7 +26,7 @@ help:
 	@echo "  make check             - Run all checks (fmt, vet, lint, test)"
 	@echo "  make swagger          - Generate Swagger documentation"
 	@echo "  make swagger-serve    - Generate Swagger docs and start server"
-	@echo "  make migrate-up       - Run database migrations"
+	@echo "  make migrate-up      - Run database migrations (DEV/PROD)"
 	@echo "  make migrate-down     - Rollback last migration"
 	@echo "  make migrate-create   - Create a new migration (NAME=description)"
 	@echo "  make migrate-status   - Check migration status"
@@ -273,23 +276,104 @@ seed:
 
 # Database migrations
 migrate-up:
-	@echo "Running migrations..."
-	@echo "DATABASE_URL=$(DATABASE_URL)"
-	@migrate -path migrations -database "$(DATABASE_URL)" up || (echo "⚠️  Install migrate: go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest" && exit 1)
+	@echo ""
+	@echo "Select environment:"
+	@echo "1) DEV"
+	@echo "2) PROD"
+	@printf "Enter choice [1-2]: "
+	@read ENV_CHOICE; \
+	if [ "$$ENV_CHOICE" = "1" ]; then \
+		DB_URL="$(DEV_DATABASE_URL)"; \
+		echo "Using DEV database"; \
+	elif [ "$$ENV_CHOICE" = "2" ]; then \
+		if [ -z "$(PROD_DATABASE_URL)" ]; then \
+			echo "❌ PROD_DATABASE_URL is not set"; \
+			echo "Set it with: export PROD_DATABASE_URL='postgresql://...'"; \
+			exit 1; \
+		fi; \
+		echo ""; \
+		echo "⚠️ WARNING: You are about to run migrations on PROD."; \
+		printf "Type PROD to continue: "; \
+		read PROD_CONFIRM; \
+		if [ "$$PROD_CONFIRM" != "PROD" ]; then \
+			echo "❌ Production migration cancelled"; \
+			exit 1; \
+		fi; \
+		DB_URL="$(PROD_DATABASE_URL)"; \
+		echo "Using PROD database"; \
+	else \
+		echo "❌ Invalid choice"; \
+		exit 1; \
+	fi; \
+	echo ""; \
+	migrate -path migrations -database "$$DB_URL" up || { echo "❌ Migration failed"; exit 1; }; \
+	echo "✅ Migrations complete"
 
 migrate-down:
-	@echo "Rolling back $(or $(STEPS),1) migration(s)..."
-	@echo "DATABASE_URL=$(DATABASE_URL)"
-	@migrate -path migrations -database "$(DATABASE_URL)" down $(or $(STEPS),1) || (echo "⚠️  Install migrate: go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest" && exit 1)
+	@echo ""
+	@echo "Select environment:"
+	@echo "1) DEV"
+	@echo "2) PROD"
+	@printf "Enter choice [1-2]: "
+	@read ENV_CHOICE; \
+	if [ "$$ENV_CHOICE" = "1" ]; then \
+		DB_URL="$(DEV_DATABASE_URL)"; \
+		echo "Using DEV database"; \
+	elif [ "$$ENV_CHOICE" = "2" ]; then \
+		if [ -z "$(PROD_DATABASE_URL)" ]; then \
+			echo "❌ PROD_DATABASE_URL is not set"; \
+			exit 1; \
+		fi; \
+		echo ""; \
+		echo "⚠️ WARNING: You are about to rollback PROD."; \
+		printf "Type PROD to continue: "; \
+		read PROD_CONFIRM; \
+		if [ "$$PROD_CONFIRM" != "PROD" ]; then \
+			echo "❌ Production rollback cancelled"; \
+			exit 1; \
+		fi; \
+		DB_URL="$(PROD_DATABASE_URL)"; \
+		echo "Using PROD database"; \
+	else \
+		echo "❌ Invalid choice"; \
+		exit 1; \
+	fi; \
+	if [ -z "$(STEPS)" ]; then \
+		ROLLBACK_STEPS=1; \
+	else \
+		ROLLBACK_STEPS=$(STEPS); \
+	fi; \
+	echo "Rolling back $$ROLLBACK_STEPS migration(s)..."; \
+	migrate -path migrations -database "$$DB_URL" down $$ROLLBACK_STEPS || { echo "❌ Migration rollback failed"; exit 1; }; \
+	echo "✅ Rollback complete"
 
 migrate-create:
 	@if [ -z "$(NAME)" ]; then echo "❌ Error: NAME is required. Usage: make migrate-create NAME=add_users_table"; exit 1; fi
 	@migrate create -ext sql -dir migrations -seq $(NAME) || (echo "⚠️  Install migrate: go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest" && exit 1)
 
 migrate-status:
-	@echo "Migration status:"
-	@echo "DATABASE_URL=$(DATABASE_URL)"
-	@out=$$(migrate -path migrations -database "$(DATABASE_URL)" version 2>&1); \
+	@echo ""
+	@echo "Select environment:"
+	@echo "1) DEV"
+	@echo "2) PROD"
+	@printf "Enter choice [1-2]: "
+	@read ENV_CHOICE; \
+	if [ "$$ENV_CHOICE" = "1" ]; then \
+		DB_URL="$(DEV_DATABASE_URL)"; \
+		echo "Using DEV database"; \
+	elif [ "$$ENV_CHOICE" = "2" ]; then \
+		if [ -z "$(PROD_DATABASE_URL)" ]; then \
+			echo "❌ PROD_DATABASE_URL is not set"; \
+			exit 1; \
+		fi; \
+		DB_URL="$(PROD_DATABASE_URL)"; \
+		echo "Using PROD database"; \
+	else \
+		echo "❌ Invalid choice"; \
+		exit 1; \
+	fi; \
+	echo "Migration status:"; \
+	out=$$(migrate -path migrations -database "$$DB_URL" version 2>&1); \
 	code=$$?; \
 	if [ $$code -eq 0 ]; then \
 		echo "$$out"; \
@@ -297,10 +381,9 @@ migrate-status:
 		echo "none applied (database is empty — run make migrate-up)"; \
 	else \
 		echo "$$out"; \
-		echo "⚠️  Install migrate: go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest"; \
+		echo "⚠️ Install migrate: go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest"; \
 		exit 1; \
 	fi
-
 # Test database setup
 test-setup:
 	@echo "Setting up test database..."
