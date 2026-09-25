@@ -51,18 +51,18 @@ func parseProfile(body []byte) (*Profile, error) {
 	}
 
 	var v1 struct {
-		FirstName   string `json:"firstName"`
-		LastName    string `json:"lastName"`
-		FirstName2  string `json:"first_name"`
-		LastName2   string `json:"last_name"`
-		PhoneNumber any    `json:"phoneNumber"`
-		PhoneNumber2 any   `json:"phone_number"`
-		Email       string `json:"email"`
-		CountryCode string `json:"countryCode"`
+		FirstName    string `json:"firstName"`
+		LastName     string `json:"lastName"`
+		FirstName2   string `json:"first_name"`
+		LastName2    string `json:"last_name"`
+		PhoneNumber  any    `json:"phoneNumber"`
+		PhoneNumber2 any    `json:"phone_number"`
+		Email        string `json:"email"`
+		CountryCode  string `json:"countryCode"`
 		CountryCode2 string `json:"country_code"`
-		AvatarURL   string `json:"avatarUrl"`
-		AvatarURL2  string `json:"avatar_url"`
-		Data        *struct {
+		AvatarURL    string `json:"avatarUrl"`
+		AvatarURL2   string `json:"avatar_url"`
+		Data         *struct {
 			FirstName   string `json:"firstName"`
 			LastName    string `json:"lastName"`
 			PhoneNumber any    `json:"phoneNumber"`

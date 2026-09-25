@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
@@ -38,10 +39,16 @@ func main() {
 	// Load .env file if it exists (for local development)
 	_ = godotenv.Load()
 
+	if err := run(); err != nil {
+		log.Fatal().Err(err).Msg("server stopped with error")
+	}
+}
+
+func run() error {
 	// Load configuration
 	cfg, err := LoadConfig()
 	if err != nil {
-		log.Fatal().Err(err).Msg("failed to load config")
+		return fmt.Errorf("load config: %w", err)
 	}
 
 	// Configure logging
@@ -52,13 +59,14 @@ func main() {
 	// Connect to database
 	db, err := database.NewDB(ctx, cfg.DatabaseURL)
 	if err != nil {
-		log.Fatal().Err(err).Msg("failed to connect to database")
+		return fmt.Errorf("connect to database: %w", err)
 	}
 	defer db.Close()
 
 	userService := identity.NewService(identity.NewRepository(db.Pool), cfg.JWTSecret)
-	if err := userService.BootstrapAdmin(ctx, cfg.BootstrapAdminEmail, cfg.BootstrapAdminPassword, cfg.BootstrapAdminPhone); err != nil {
-		log.Fatal().Err(err).Msg("failed to bootstrap admin user")
+	err = userService.BootstrapAdmin(ctx, cfg.BootstrapAdminEmail, cfg.BootstrapAdminPassword, cfg.BootstrapAdminPhone)
+	if err != nil {
+		return fmt.Errorf("bootstrap admin user: %w", err)
 	}
 
 	// Setup routes
@@ -102,6 +110,7 @@ func main() {
 	}
 
 	log.Info().Msg("server exited")
+	return nil
 }
 
 // setupLogging configures the global logger

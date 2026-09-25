@@ -74,7 +74,8 @@ func SetupRoutes(db *database.DB, cfg *Config) *chi.Mux {
 	progressHandler := progress.NewHandler(progress.NewService(progress.NewRepository(db.Gorm)))
 	categoryHandler := catalog.NewHandler(catalog.NewService(catalog.NewRepository(db.Gorm)))
 	storeHandler := stores.NewHandler(stores.NewService(stores.NewRepository(db.Gorm), retailerRepo))
-	listProductsHandler := listproducts.NewHandler(listproducts.NewService(listproducts.NewRepository(db.Gorm), retailerRepo))
+	listProductsService := listproducts.NewService(listproducts.NewRepository(db.Gorm), retailerRepo)
+	listProductsHandler := listproducts.NewHandler(listProductsService)
 	truecallerHandler := truecaller.NewHandler(truecaller.NewService(truecaller.NewStore(cfg.RedisURL), userService))
 
 	// API Routes
