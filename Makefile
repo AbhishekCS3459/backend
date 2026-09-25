@@ -66,7 +66,7 @@ swagger-serve: swagger
 # Build the application
 build:
 	@echo "Building application..."
-	@go build -o bin/api ./cmd/api
+	@go build -ldflags "-X github.com/AbhishekCS3459/find-me-backend/internal/platform/version.Version=$$(git rev-parse --short=12 HEAD 2>/dev/null || echo dev)" -o bin/api ./cmd/api
 	@echo "✅ Built: bin/api"
 
 # Run the application

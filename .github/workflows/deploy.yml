@@ -50,7 +50,10 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Build and push image
-        run: az acr build --registry "$ACR_NAME" --image "${IMAGE_NAME}:${TAG}" --image "${IMAGE_NAME}:latest" .
+        run: |
+          az acr build --registry "$ACR_NAME" \
+            --image "${IMAGE_NAME}:${TAG}" --image "${IMAGE_NAME}:latest" \
+            --build-arg VERSION="$TAG" .
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -97,12 +100,15 @@ jobs:
       - name: Health check
         run: |
           for attempt in $(seq 1 30); do
-            if curl -fsS "$HEALTH_URL"; then
-              echo
-              echo "Healthy after $attempt attempt(s)"
+            BODY=$(curl -fsS "$HEALTH_URL" || true)
+            LIVE_VERSION=$(echo "$BODY" | jq -r '.version // empty' 2>/dev/null || true)
+            if [ "$LIVE_VERSION" = "$TAG" ]; then
+              echo "$BODY"
+              echo "Version $TAG healthy after $attempt attempt(s)"
               exit 0
             fi
+            echo "Attempt $attempt: live version '${LIVE_VERSION:-unreachable}', waiting for $TAG"
             sleep 10
           done
-          echo "Health check failed: $HEALTH_URL"
+          echo "Health check failed: $HEALTH_URL never reported version $TAG"
           exit 1

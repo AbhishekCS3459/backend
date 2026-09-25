@@ -7,6 +7,7 @@ import (
 
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/database"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/httputil"
+	"github.com/AbhishekCS3459/find-me-backend/internal/platform/version"
 )
 
 // Handler handles health check requests
@@ -53,7 +54,7 @@ func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 		Service:   "find-me-backend",
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 		Uptime:    time.Since(startTime).String(),
-		Version: "1.1.1",
+		Version:   version.Get(),
 	}
 
 	// Check database health if database is available

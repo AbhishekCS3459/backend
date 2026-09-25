@@ -14,7 +14,10 @@ RUN go mod download
 COPY . .
 
 # Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o api ./cmd/api
+ARG VERSION=dev
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo \
+    -ldflags "-X github.com/AbhishekCS3459/find-me-backend/internal/platform/version.Version=${VERSION}" \
+    -o api ./cmd/api
 
 # Final stage
 FROM alpine:latest
