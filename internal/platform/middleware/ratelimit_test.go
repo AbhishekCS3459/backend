@@ -98,6 +98,37 @@ func TestRateLimit_RejectsRequestsOverLimit(t *testing.T) {
 	}
 }
 
+func TestRateLimit_EachRequestUsesOneToken(t *testing.T) {
+	config := &RateLimiterConfig{
+		RequestsPerSecond: 0.001, // effectively no refill during the test
+		Burst:             20,
+		CleanupInterval:   1 * time.Minute,
+		MaxIPs:            1000,
+	}
+	handler := RateLimit(config)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.RemoteAddr = "127.0.0.1:12348"
+	allowed := 0
+	var lastRemaining string
+	for i := 0; i < 30; i++ {
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		if rr.Code == http.StatusOK {
+			allowed++
+			lastRemaining = rr.Header().Get("X-RateLimit-Remaining")
+		}
+	}
+	if allowed != config.Burst {
+		t.Fatalf("allowed %d requests, want exactly the burst of %d", allowed, config.Burst)
+	}
+	if lastRemaining != "0" {
+		t.Errorf("X-RateLimit-Remaining after the last allowed request = %q, want 0", lastRemaining)
+	}
+}
+
 func TestRateLimit_DifferentIPsHaveSeparateLimits(t *testing.T) {
 	config := &RateLimiterConfig{
 		RequestsPerSecond: 2.0,

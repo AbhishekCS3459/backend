@@ -33,6 +33,7 @@
 package middleware
 
 import (
+	"math"
 	"net/http"
 	"strconv"
 	"sync"
@@ -175,31 +176,32 @@ func RateLimit(config *RateLimiterConfig) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Get client IP (handles proxies via X-Forwarded-For)
 			ip := getClientIP(r)
+			ipLimiter := limiter.getLimiter(ip)
 
-			// Check if request is allowed
-			if !limiter.Allow(ip) {
-				// Set rate limit headers
-				w.Header().Set("X-RateLimit-Limit", formatInt(int(config.RequestsPerSecond)))
-				w.Header().Set("X-RateLimit-Remaining", "0")
-				w.Header().Set("X-RateLimit-Reset", formatInt(int(time.Now().Add(time.Second).Unix())))
-				w.Header().Set("Retry-After", "1")
+			// Allow takes the request's one token. The headers below only read
+			// the bucket (Tokens); Reserve would take a second token and halve
+			// the configured rate and burst.
+			allowed := ipLimiter.Allow()
+			tokens := ipLimiter.Tokens()
+			now := time.Now()
+			perSecond := config.RequestsPerSecond
 
+			w.Header().Set("X-RateLimit-Limit", formatInt(int(perSecond)))
+			w.Header().Set("X-RateLimit-Remaining", formatInt(max(int(tokens), 0)))
+			// Reset is when the bucket is full again.
+			reset, retryAfter := now, 1
+			if perSecond > 0 {
+				reset = now.Add(time.Duration((float64(config.Burst) - tokens) / perSecond * float64(time.Second)))
+				// Seconds until the next token, rounded up.
+				retryAfter = max(int(math.Ceil((1-tokens)/perSecond)), 1)
+			}
+			w.Header().Set("X-RateLimit-Reset", formatInt(int(reset.Unix())))
+
+			if !allowed {
+				w.Header().Set("Retry-After", formatInt(retryAfter))
 				http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 				return
 			}
-
-			// Get limiter to calculate remaining tokens
-			limiterInstance := limiter.getLimiter(ip)
-			reservation := limiterInstance.Reserve()
-
-			// Set rate limit headers (informational)
-			w.Header().Set("X-RateLimit-Limit", formatInt(int(config.RequestsPerSecond)))
-			// Note: In a real implementation, you'd track remaining tokens more accurately
-			w.Header().Set("X-RateLimit-Remaining", "1") // Simplified
-
-			// Calculate reset time (next token available)
-			resetTime := time.Now().Add(reservation.Delay())
-			w.Header().Set("X-RateLimit-Reset", formatInt(int(resetTime.Unix())))
 
 			next.ServeHTTP(w, r)
 		})
