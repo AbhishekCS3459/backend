@@ -44,6 +44,18 @@ func main() {
 	if uri == "" {
 		log.Fatal().Msg("DATABASE_URL_MONGODB_PROD is not set")
 	}
+	var selected []string
+	if *only != "" {
+		selected = strings.Split(*only, ",")
+	}
+	if err := run(uri, selected); err != nil {
+		log.Fatal().Err(err).Msg("catalogue indexes failed")
+	}
+	log.Info().Msg("all catalogue indexes are ready")
+}
+
+// run creates the indexes named in selected, or all of them when it is nil.
+func run(uri string, selected []string) error {
 	dbName := envOr("MONGODB_CATALOG_DATABASE", "catalog")
 	colName := envOr("MONGODB_CATALOG_COLLECTION", "products")
 
@@ -53,15 +65,11 @@ func main() {
 
 	client, err := mongodb.Connect(ctx, uri)
 	if err != nil {
-		log.Fatal().Err(err).Msg("connect")
+		return fmt.Errorf("connect: %w", err)
 	}
 	defer func() { _ = client.Close(context.Background()) }()
 
 	col := client.Database(dbName).Collection(colName)
-	var selected []string
-	if *only != "" {
-		selected = strings.Split(*only, ",")
-	}
 	wanted := func(name string) bool { return selected == nil || slices.Contains(selected, name) }
 
 	for _, index := range productcatalog.Indexes() {
@@ -71,7 +79,7 @@ func main() {
 		start := time.Now()
 		log.Info().Str("index", index.Name).Msg("creating index")
 		if _, err := col.Indexes().CreateOne(ctx, index.Model); err != nil {
-			log.Fatal().Err(err).Str("index", index.Name).Msg("create index failed")
+			return fmt.Errorf("create index %s: %w", index.Name, err)
 		}
 		log.Info().Str("index", index.Name).Dur("took", time.Since(start)).Msg("index ready")
 	}
@@ -79,11 +87,11 @@ func main() {
 	if wanted(productcatalog.SearchIndexName) {
 		start := time.Now()
 		if err := ensureSearchIndex(ctx, col.SearchIndexes()); err != nil {
-			log.Fatal().Err(err).Str("index", productcatalog.SearchIndexName).Msg("search index failed")
+			return fmt.Errorf("search index %s: %w", productcatalog.SearchIndexName, err)
 		}
 		log.Info().Str("index", productcatalog.SearchIndexName).Dur("took", time.Since(start)).Msg("search index ready")
 	}
-	log.Info().Msg("all catalogue indexes are ready")
+	return nil
 }
 
 // searchIndexStatus is the part of a $listSearchIndexes entry this command reads.
@@ -164,7 +172,11 @@ func waitReady(ctx context.Context, view mongo.SearchIndexView, name string) err
 		case "FAILED":
 			return errors.New("search index build failed; see the Atlas UI for the reason")
 		}
-		log.Info().Str("index", name).Str("status", index.Status).Bool("queryable", index.Queryable).Msg("waiting for search index")
+		log.Info().
+			Str("index", name).
+			Str("status", index.Status).
+			Bool("queryable", index.Queryable).
+			Msg("waiting for search index")
 		select {
 		case <-ctx.Done():
 			return ctx.Err()

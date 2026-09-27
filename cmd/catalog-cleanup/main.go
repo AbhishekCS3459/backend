@@ -50,9 +50,11 @@ type stats struct {
 	Dropped                                                map[string]int
 }
 
+const defaultDrop = "platform,url,city,locality,address,scrapedAt"
+
 func main() {
 	apply := flag.Bool("apply", false, "write the changes (default: dry run)")
-	drop := flag.String("drop", "platform,url,city,locality,address,scrapedAt", "comma-separated top-level fields to remove from every product")
+	drop := flag.String("drop", defaultDrop, "comma-separated top-level fields to remove from every product")
 	batch := flag.Int("batch", 500, "updates per bulk write")
 	flag.Parse()
 
@@ -67,6 +69,12 @@ func main() {
 	if uri == "" {
 		log.Fatal().Msg("DATABASE_URL_MONGODB_PROD is not set")
 	}
+	if err := run(uri, dropFields, *apply, max(*batch, 1)); err != nil {
+		log.Fatal().Err(err).Msg("catalogue cleanup failed")
+	}
+}
+
+func run(uri string, dropFields []string, apply bool, batchSize int) error {
 	dbName := envOr("MONGODB_CATALOG_DATABASE", "catalog")
 	colName := envOr("MONGODB_CATALOG_COLLECTION", "products")
 
@@ -77,7 +85,7 @@ func main() {
 
 	client, err := mongodb.Connect(ctx, uri)
 	if err != nil {
-		log.Fatal().Err(err).Msg("connect")
+		return fmt.Errorf("connect: %w", err)
 	}
 	defer func() { _ = client.Close(context.Background()) }()
 	col := client.Database(dbName).Collection(colName)
@@ -85,22 +93,22 @@ func main() {
 	log.Info().
 		Str("collection", dbName+"."+colName).
 		Strs("drop", dropFields).
-		Bool("apply", *apply).
+		Bool("apply", apply).
 		Msg("starting catalogue cleanup")
 
 	start := time.Now()
-	s, err := cleanup(ctx, col, dropFields, *apply, max(*batch, 1))
+	s, err := cleanup(ctx, col, dropFields, apply, batchSize)
 	logStats(s, time.Since(start), err)
 	if err != nil {
-		os.Exit(1)
+		return err
 	}
-	if err := dropIndexes(ctx, col, dropFields, *apply); err != nil {
-		log.Error().Err(err).Msg("dropping indexes failed")
-		os.Exit(1)
+	if err := dropIndexes(ctx, col, dropFields, apply); err != nil {
+		return fmt.Errorf("drop indexes: %w", err)
 	}
-	if !*apply && s.NeedUpdate > 0 {
+	if !apply && s.NeedUpdate > 0 {
 		log.Info().Msg("dry run: nothing was written; re-run with -apply to make these changes")
 	}
+	return nil
 }
 
 func parseDrop(value string) ([]string, error) {
@@ -138,7 +146,9 @@ func sameSearch(stored bson.RawValue, want productcatalog.SearchFields) bool {
 	return err == nil && stored.Type == bson.TypeEmbeddedDocument && bytes.Equal(stored.Value, encoded)
 }
 
-func cleanup(ctx context.Context, col *mongo.Collection, dropFields []string, apply bool, batchSize int) (stats, error) {
+func cleanup(
+	ctx context.Context, col *mongo.Collection, dropFields []string, apply bool, batchSize int,
+) (stats, error) {
 	s := stats{Dropped: map[string]int{}}
 	projection := bson.D{
 		{Key: "name", Value: 1},
