@@ -25,7 +25,7 @@ var (
 
 const userSelectColumns = `
 	id, phone, is_phone_verified, email, password_hash, user_type, status,
-	full_name, avatar_url, city, bio,
+	full_name, avatar_url, city, bio, must_change_password,
 	password_reset_token, password_reset_expires_at, created_at, updated_at
 `
 
@@ -69,6 +69,7 @@ func scanUser(scanner interface {
 		&user.AvatarURL,
 		&user.City,
 		&user.Bio,
+		&user.MustChangePassword,
 		&user.PasswordResetToken,
 		&user.PasswordResetExpiresAt,
 		&user.CreatedAt,
@@ -236,7 +237,8 @@ func (r *repository) Update(ctx context.Context, user *User) error {
 func (r *repository) UpdatePassword(ctx context.Context, userID uuid.UUID, hashedPassword string) error {
 	query := `
 		UPDATE users
-		SET password_hash = $2, password_reset_token = NULL, password_reset_expires_at = NULL, updated_at = $3
+		SET password_hash = $2, must_change_password = FALSE,
+		    password_reset_token = NULL, password_reset_expires_at = NULL, updated_at = $3
 		WHERE id = $1
 		RETURNING updated_at
 	`

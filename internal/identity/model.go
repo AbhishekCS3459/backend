@@ -43,6 +43,7 @@ type User struct {
 	AvatarURL              string     `json:"avatar_url" db:"avatar_url"`
 	City                   string     `json:"city" db:"city"`
 	Bio                    string     `json:"bio" db:"bio"`
+	MustChangePassword     bool       `json:"must_change_password" db:"must_change_password"`
 	PasswordResetToken     *string    `json:"-" db:"password_reset_token"`
 	PasswordResetExpiresAt *time.Time `json:"-" db:"password_reset_expires_at"`
 	CreatedAt              time.Time  `json:"created_at" db:"created_at"`
@@ -97,7 +98,9 @@ type RegisterRequest struct {
 }
 
 type LoginRequest struct {
-	Email    string `json:"email" validate:"required,email"`
+	// Email or Phone identifies the account; staff without an email use their phone.
+	Email    string `json:"email" validate:"required_without=Phone,omitempty,email"`
+	Phone    string `json:"phone" validate:"required_without=Email,omitempty,max=32"`
 	Password string `json:"password" validate:"required"`
 }
 
@@ -148,6 +151,7 @@ type UserResponse struct {
 	AvatarURL           string    `json:"avatar_url"`
 	City                string    `json:"city"`
 	Bio                 string    `json:"bio"`
+	MustChangePassword  bool      `json:"must_change_password"`
 	ProfileCompletedPct int       `json:"profile_completed_pct"`
 	CreatedAt           time.Time `json:"created_at"`
 	UpdatedAt           time.Time `json:"updated_at"`
@@ -186,6 +190,7 @@ func (u *User) ToResponse() *UserResponse {
 		AvatarURL:           u.AvatarURL,
 		City:                u.City,
 		Bio:                 u.Bio,
+		MustChangePassword:  u.MustChangePassword,
 		ProfileCompletedPct: u.ProfileCompletedPct(),
 		CreatedAt:           u.CreatedAt,
 		UpdatedAt:           u.UpdatedAt,

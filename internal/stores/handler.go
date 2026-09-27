@@ -73,7 +73,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, http.StatusBadRequest, "invalid store id")
 		return
 	}
-	row, err := h.svc.GetOwned(r.Context(), userID, storeID)
+	row, err := h.svc.Get(r.Context(), userID, storeID)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			httputil.WriteError(w, http.StatusNotFound, "store not found")

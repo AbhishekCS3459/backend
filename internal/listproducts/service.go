@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/AbhishekCS3459/find-me-backend/internal/identity/retailer"
+	"github.com/AbhishekCS3459/find-me-backend/internal/storeaccess"
 	"github.com/google/uuid"
 )
 
@@ -19,35 +19,28 @@ type Service interface {
 }
 
 type service struct {
-	repo      Repository
-	retailers retailer.Repository
+	repo   Repository
+	access storeaccess.Resolver
 }
 
-func NewService(repo Repository, retailers retailer.Repository) Service {
-	return &service{repo: repo, retailers: retailers}
+func NewService(repo Repository, access storeaccess.Resolver) Service {
+	return &service{repo: repo, access: access}
 }
 
-func (s *service) retailerID(ctx context.Context, userID uuid.UUID) (uuid.UUID, error) {
-	profile, err := s.retailers.FindByUserID(ctx, userID)
+// authorize checks the caller's permission in the store and returns the
+// retailer that owns it (products belong to the retailer, not the store).
+func (s *service) authorize(
+	ctx context.Context, userID, storeID uuid.UUID, permission storeaccess.Permission,
+) (uuid.UUID, error) {
+	access, err := s.access.Require(ctx, userID, storeID, permission)
 	if err != nil {
 		return uuid.Nil, err
 	}
-	return profile.ID, nil
-}
-
-func (s *service) assertOwned(ctx context.Context, userID, storeID uuid.UUID) (uuid.UUID, error) {
-	retailerID, err := s.retailerID(ctx, userID)
-	if err != nil {
-		return uuid.Nil, err
-	}
-	if err := s.repo.AssertStoreOwned(ctx, storeID, retailerID); err != nil {
-		return uuid.Nil, err
-	}
-	return retailerID, nil
+	return access.RetailerID, nil
 }
 
 func (s *service) List(ctx context.Context, userID, storeID uuid.UUID, query, status string) ([]Listing, *StoreSummary, error) {
-	if _, err := s.assertOwned(ctx, userID, storeID); err != nil {
+	if _, err := s.authorize(ctx, userID, storeID, storeaccess.InventoryView); err != nil {
 		return nil, nil, err
 	}
 	rows, err := s.repo.ListStoreProducts(ctx, storeID, query, status)
@@ -62,7 +55,7 @@ func (s *service) List(ctx context.Context, userID, storeID uuid.UUID, query, st
 }
 
 func (s *service) Catalog(ctx context.Context, userID, storeID uuid.UUID, query string) ([]CatalogItem, error) {
-	retailerID, err := s.assertOwned(ctx, userID, storeID)
+	retailerID, err := s.authorize(ctx, userID, storeID, storeaccess.CatalogView)
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +63,7 @@ func (s *service) Catalog(ctx context.Context, userID, storeID uuid.UUID, query 
 }
 
 func (s *service) Add(ctx context.Context, userID, storeID uuid.UUID, req *AddRequest) (*Listing, error) {
-	retailerID, err := s.assertOwned(ctx, userID, storeID)
+	retailerID, err := s.authorize(ctx, userID, storeID, storeaccess.CatalogManage)
 	if err != nil {
 		return nil, err
 	}
@@ -82,7 +75,7 @@ func (s *service) Add(ctx context.Context, userID, storeID uuid.UUID, req *AddRe
 }
 
 func (s *service) Create(ctx context.Context, userID, storeID uuid.UUID, req *CreateProductRequest) (*Listing, error) {
-	retailerID, err := s.assertOwned(ctx, userID, storeID)
+	retailerID, err := s.authorize(ctx, userID, storeID, storeaccess.CatalogManage)
 	if err != nil {
 		return nil, err
 	}
@@ -90,21 +83,21 @@ func (s *service) Create(ctx context.Context, userID, storeID uuid.UUID, req *Cr
 }
 
 func (s *service) Update(ctx context.Context, userID, storeID, variantID uuid.UUID, req *UpdateRequest) (*Listing, error) {
-	if _, err := s.assertOwned(ctx, userID, storeID); err != nil {
+	if _, err := s.authorize(ctx, userID, storeID, storeaccess.InventoryUpdate); err != nil {
 		return nil, err
 	}
 	return s.repo.UpdateListing(ctx, storeID, variantID, req)
 }
 
 func (s *service) BulkUpdate(ctx context.Context, userID, storeID uuid.UUID, req *BulkUpdateRequest) (int, error) {
-	if _, err := s.assertOwned(ctx, userID, storeID); err != nil {
+	if _, err := s.authorize(ctx, userID, storeID, storeaccess.InventoryUpdate); err != nil {
 		return 0, err
 	}
 	return s.repo.BulkUpdateListings(ctx, storeID, req.Items)
 }
 
 func (s *service) Remove(ctx context.Context, userID, storeID, variantID uuid.UUID) error {
-	if _, err := s.assertOwned(ctx, userID, storeID); err != nil {
+	if _, err := s.authorize(ctx, userID, storeID, storeaccess.CatalogManage); err != nil {
 		return err
 	}
 	return s.repo.RemoveListing(ctx, storeID, variantID)
@@ -112,8 +105,10 @@ func (s *service) Remove(ctx context.Context, userID, storeID, variantID uuid.UU
 
 func MapError(err error) (int, string) {
 	switch {
-	case errors.Is(err, retailer.ErrNotFound), errors.Is(err, ErrForbidden):
+	case errors.Is(err, storeaccess.ErrNotFound):
 		return 404, "store not found"
+	case errors.Is(err, storeaccess.ErrForbidden):
+		return 403, err.Error()
 	case errors.Is(err, ErrNotFound):
 		return 404, "product listing not found"
 	case errors.Is(err, ErrVariantNotFound):

@@ -85,7 +85,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	response, err := h.svc.Login(r.Context(), &req)
 	if err != nil {
 		log.Error().Err(err).Str("email", req.Email).Msg("failed to login")
-		httputil.WriteError(w, http.StatusUnauthorized, "invalid email or password")
+		httputil.WriteError(w, http.StatusUnauthorized, "invalid email, phone or password")
 		return
 	}
 

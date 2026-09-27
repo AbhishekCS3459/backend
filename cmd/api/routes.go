@@ -15,7 +15,9 @@ import (
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/middleware"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/mongodb"
 	"github.com/AbhishekCS3459/find-me-backend/internal/productcatalog"
+	"github.com/AbhishekCS3459/find-me-backend/internal/storeaccess"
 	"github.com/AbhishekCS3459/find-me-backend/internal/stores"
+	"github.com/AbhishekCS3459/find-me-backend/internal/team"
 	"github.com/AbhishekCS3459/find-me-backend/internal/truecaller"
 	"github.com/go-chi/chi/v5"
 	chiMiddleware "github.com/go-chi/chi/v5/middleware"
@@ -77,9 +79,11 @@ func SetupRoutes(db *database.DB, mongoClient *mongodb.Client, cfg *Config) *chi
 	retailerHandler := retailer.NewHandler(retailerService)
 	progressHandler := progress.NewHandler(progress.NewService(progress.NewRepository(db.Gorm)))
 	categoryHandler := catalog.NewHandler(catalog.NewService(catalog.NewRepository(db.Gorm)))
-	storeHandler := stores.NewHandler(stores.NewService(stores.NewRepository(db.Gorm), retailerRepo))
-	listProductsService := listproducts.NewService(listproducts.NewRepository(db.Gorm), retailerRepo)
+	storeAccess := storeaccess.NewResolver(db.Gorm)
+	storeHandler := stores.NewHandler(stores.NewService(stores.NewRepository(db.Gorm), retailerRepo, storeAccess))
+	listProductsService := listproducts.NewService(listproducts.NewRepository(db.Gorm), storeAccess)
 	listProductsHandler := listproducts.NewHandler(listProductsService)
+	teamHandler := team.NewHandler(team.NewService(team.NewRepository(db.Gorm), storeAccess))
 	truecallerHandler := truecaller.NewHandler(truecaller.NewService(truecaller.NewStore(cfg.RedisURL), userService))
 
 	var catalogCollection *mongo.Collection
@@ -129,6 +133,7 @@ func SetupRoutes(db *database.DB, mongoClient *mongodb.Client, cfg *Config) *chi
 			r.Mount("/", listProductsHandler.Routes())
 		})
 		r.Mount("/stores", storeHandler.Routes())
+		r.Mount("/team", teamHandler.Routes())
 		r.Mount("/truecaller", truecallerHandler.Routes())
 
 		// Future: API versioning example

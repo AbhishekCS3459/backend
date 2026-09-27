@@ -14,8 +14,7 @@ import (
 var ErrNotFound = errors.New("store not found")
 
 type Repository interface {
-	ListByRetailer(ctx context.Context, retailerID uuid.UUID) ([]Summary, error)
-	FindOwned(ctx context.Context, storeID, retailerID uuid.UUID) (*Store, error)
+	ListByIDs(ctx context.Context, ids []uuid.UUID) ([]Summary, error)
 	Create(ctx context.Context, store *Store, images []string) (*Summary, error)
 	DefaultCategoryID(ctx context.Context) (uuid.UUID, error)
 }
@@ -28,9 +27,12 @@ func NewRepository(db *gorm.DB) Repository {
 	return &repository{db: db}
 }
 
-func (r *repository) ListByRetailer(ctx context.Context, retailerID uuid.UUID) ([]Summary, error) {
+func (r *repository) ListByIDs(ctx context.Context, ids []uuid.UUID) ([]Summary, error) {
+	if len(ids) == 0 {
+		return []Summary{}, nil
+	}
 	var rows []Store
-	if err := r.db.WithContext(ctx).Where("retailer_id = ?", retailerID).Order("created_at desc").Find(&rows).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where("id IN ?", ids).Order("created_at desc").Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("list stores: %w", err)
 	}
 	out := make([]Summary, 0, len(rows))
@@ -42,18 +44,6 @@ func (r *repository) ListByRetailer(ctx context.Context, retailerID uuid.UUID) (
 		out = append(out, *summary)
 	}
 	return out, nil
-}
-
-func (r *repository) FindOwned(ctx context.Context, storeID, retailerID uuid.UUID) (*Store, error) {
-	var row Store
-	err := r.db.WithContext(ctx).Where("id = ? AND retailer_id = ?", storeID, retailerID).First(&row).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, ErrNotFound
-	}
-	if err != nil {
-		return nil, fmt.Errorf("find store: %w", err)
-	}
-	return &row, nil
 }
 
 func (r *repository) Create(ctx context.Context, store *Store, images []string) (*Summary, error) {

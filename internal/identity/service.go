@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AbhishekCS3459/find-me-backend/internal/platform/phone"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
@@ -78,13 +79,13 @@ func (s *service) Register(ctx context.Context, req *RegisterRequest) (*User, er
 }
 
 func (s *service) Login(ctx context.Context, req *LoginRequest) (*LoginResponse, error) {
-	user, err := s.repo.FindByEmail(ctx, req.Email)
+	user, err := s.findLoginUser(ctx, req)
 	if err != nil {
-		return nil, fmt.Errorf("invalid email or password")
+		return nil, fmt.Errorf("invalid login details")
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password)); err != nil {
-		return nil, fmt.Errorf("invalid email or password")
+		return nil, fmt.Errorf("invalid login details")
 	}
 
 	token, err := s.generateToken(user.ID, user.Email, user.UserType)
@@ -96,6 +97,20 @@ func (s *service) Login(ctx context.Context, req *LoginRequest) (*LoginResponse,
 		Token: token,
 		User:  *user,
 	}, nil
+}
+
+func (s *service) findLoginUser(ctx context.Context, req *LoginRequest) (*User, error) {
+	if email := strings.TrimSpace(req.Email); email != "" {
+		return s.repo.FindByEmail(ctx, email)
+	}
+	raw := strings.TrimSpace(req.Phone)
+	if normalized, ok := phone.Normalize(raw); ok {
+		user, err := s.repo.FindByPhone(ctx, normalized)
+		if !errors.Is(err, ErrUserNotFound) || normalized == raw {
+			return user, err
+		}
+	}
+	return s.repo.FindByPhone(ctx, raw)
 }
 
 func (s *service) GetUser(ctx context.Context, id uuid.UUID) (*User, error) {

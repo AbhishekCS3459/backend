@@ -3,6 +3,7 @@ package stores
 import (
 	"time"
 
+	"github.com/AbhishekCS3459/find-me-backend/internal/storeaccess"
 	"github.com/google/uuid"
 )
 
@@ -38,6 +39,8 @@ type Summary struct {
 	ProductCount   int      `json:"product_count" gorm:"-"`
 	TotalInventory int      `json:"total_inventory" gorm:"-"`
 	LowStockCount  int      `json:"low_stock_count" gorm:"-"`
+	// Access is the caller's role and permissions in this store.
+	Access *storeaccess.Access `json:"access,omitempty" gorm:"-"`
 }
 
 type CreateRequest struct {

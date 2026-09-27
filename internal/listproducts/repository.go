@@ -15,7 +15,6 @@ import (
 var (
 	ErrNotFound      = errors.New("listing not found")
 	ErrAlreadyListed = errors.New("product is already listed in this store")
-	ErrForbidden     = errors.New("store not found")
 	// ErrVariantNotFound also covers variants of another retailer's products.
 	ErrVariantNotFound = errors.New("product not found")
 	// ErrSKUTaken: SKUs are unique per retailer (product_variant_retailer_sku_key).
@@ -23,7 +22,6 @@ var (
 )
 
 type Repository interface {
-	AssertStoreOwned(ctx context.Context, storeID, retailerID uuid.UUID) error
 	ListStoreProducts(ctx context.Context, storeID uuid.UUID, query, status string) ([]Listing, error)
 	StoreStats(ctx context.Context, storeID uuid.UUID) (*StoreSummary, error)
 	ListCatalog(ctx context.Context, retailerID, storeID uuid.UUID, query string) ([]CatalogItem, error)
@@ -41,18 +39,6 @@ type repository struct {
 
 func NewRepository(db *gorm.DB) Repository {
 	return &repository{db: db}
-}
-
-func (r *repository) AssertStoreOwned(ctx context.Context, storeID, retailerID uuid.UUID) error {
-	var count int64
-	err := r.db.WithContext(ctx).Table("store").Where("id = ? AND retailer_id = ?", storeID, retailerID).Count(&count).Error
-	if err != nil {
-		return fmt.Errorf("assert store: %w", err)
-	}
-	if count == 0 {
-		return ErrForbidden
-	}
-	return nil
 }
 
 func (r *repository) ListStoreProducts(ctx context.Context, storeID uuid.UUID, query, status string) ([]Listing, error) {
