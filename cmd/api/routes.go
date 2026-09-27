@@ -70,7 +70,7 @@ func SetupRoutes(db *database.DB, mongoClient *mongodb.Client, cfg *Config) *chi
 	}
 
 	userService := identity.NewService(identity.NewRepository(db.Pool), cfg.JWTSecret)
-	healthHandler := health.NewHandler(db, cfg.Environment)
+	healthHandler := health.NewHandler(db, mongoClient, cfg.Environment)
 	retailerRepo := retailer.NewRepository(db.Gorm)
 	retailerService := retailer.NewService(retailerRepo)
 	identityHandler := identity.NewHandler(userService, retailerService)

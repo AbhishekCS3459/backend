@@ -66,6 +66,19 @@ definitions:
     - password
     - phone
     type: object
+  identity.UpdateProfileRequest:
+    properties:
+      avatar_url:
+        type: string
+      bio:
+        type: string
+      city:
+        type: string
+      full_name:
+        type: string
+      phone:
+        type: string
+    type: object
   identity.UpdateUserRequest:
     properties:
       email:
@@ -79,9 +92,17 @@ definitions:
     type: object
   identity.User:
     properties:
+      avatar_url:
+        type: string
+      bio:
+        type: string
+      city:
+        type: string
       created_at:
         type: string
       email:
+        type: string
+      full_name:
         type: string
       id:
         type: string
@@ -98,9 +119,17 @@ definitions:
     type: object
   identity.UserResponse:
     properties:
+      avatar_url:
+        type: string
+      bio:
+        type: string
+      city:
+        type: string
       created_at:
         type: string
       email:
+        type: string
+      full_name:
         type: string
       id:
         type: string
@@ -108,6 +137,8 @@ definitions:
         type: boolean
       phone:
         type: string
+      profile_completed_pct:
+        type: integer
       status:
         type: string
       updated_at:
@@ -139,6 +170,15 @@ definitions:
     - UserTypeAdmin
     - RoleUser
     - RoleAdmin
+  identity.VerifyPhoneRequest:
+    properties:
+      otp:
+        maxLength: 8
+        minLength: 4
+        type: string
+    required:
+    - otp
+    type: object
   health.DatabaseHealth:
     properties:
       error:
@@ -152,6 +192,10 @@ definitions:
     properties:
       database:
         $ref: '#/definitions/health.DatabaseHealth'
+      environment:
+        type: string
+      mongodb:
+        $ref: '#/definitions/health.DatabaseHealth'
       service:
         type: string
       status:
@@ -162,6 +206,49 @@ definitions:
         type: string
       version:
         type: string
+    type: object
+  internal_truecaller.CallbackRequest:
+    properties:
+      accessToken:
+        type: string
+      endpoint:
+        type: string
+      requestId:
+        type: string
+    type: object
+  internal_truecaller.Profile:
+    properties:
+      avatarUrl:
+        type: string
+      countryCode:
+        type: string
+      email:
+        type: string
+      firstName:
+        type: string
+      lastName:
+        type: string
+      phone:
+        type: string
+    type: object
+  internal_truecaller.StartRequest:
+    properties:
+      requestId:
+        type: string
+    required:
+    - requestId
+    type: object
+  internal_truecaller.StatusResponse:
+    properties:
+      error:
+        type: string
+      profile:
+        $ref: '#/definitions/internal_truecaller.Profile'
+      status:
+        type: string
+      token:
+        type: string
+      user: {}
     type: object
   queue.Job:
     properties:
@@ -459,7 +546,9 @@ paths:
     get:
       consumes:
       - application/json
-      description: Check if the API is running and database is accessible
+      description: Check if the API is running and its databases are accessible. PostgreSQL
+        is required; MongoDB (product catalogue) is reported but does not affect the
+        status code.
       produces:
       - application/json
       responses:
@@ -468,12 +557,88 @@ paths:
           schema:
             $ref: '#/definitions/health.HealthResponse'
         "503":
-          description: Service unavailable if database is down
+          description: Service unavailable if PostgreSQL is down
           schema:
             $ref: '#/definitions/health.HealthResponse'
       summary: Health check
       tags:
       - Health
+  /api/truecaller/callback:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Truecaller callback
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_truecaller.CallbackRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/httputil.ErrorResponse'
+      summary: Truecaller callback
+      tags:
+      - Truecaller
+  /api/truecaller/start:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Request nonce
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_truecaller.StartRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/httputil.ErrorResponse'
+      summary: Start Truecaller login
+      tags:
+      - Truecaller
+  /api/truecaller/status:
+    get:
+      parameters:
+      - description: Request nonce
+        in: query
+        name: requestId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_truecaller.StatusResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/httputil.ErrorResponse'
+      summary: Truecaller login status
+      tags:
+      - Truecaller
   /api/users:
     get:
       consumes:
@@ -718,6 +883,70 @@ paths:
       security:
       - BearerAuth: []
       summary: Get current user
+      tags:
+      - Users
+    patch:
+      consumes:
+      - application/json
+      description: Patch the authenticated user's profile fields
+      parameters:
+      - description: Profile fields
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/identity.UpdateProfileRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/identity.UserResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/httputil.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/httputil.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Update current user profile
+      tags:
+      - Users
+  /api/users/me/verify-phone:
+    post:
+      consumes:
+      - application/json
+      description: Dummy OTP verification for the current user (accepts 123456 or
+        any 6-digit code)
+      parameters:
+      - description: OTP payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/identity.VerifyPhoneRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/identity.UserResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/httputil.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/httputil.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Verify phone with OTP
       tags:
       - Users
 schemes:

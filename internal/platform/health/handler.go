@@ -3,22 +3,30 @@ package health
 import (
 	"context"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/database"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/httputil"
+	"github.com/AbhishekCS3459/find-me-backend/internal/platform/mongodb"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/version"
 )
+
+// dependencyTimeout bounds each dependency ping so an unreachable backend cannot
+// stall the endpoint (the MongoDB client otherwise waits for server selection).
+const dependencyTimeout = 2 * time.Second
 
 // Handler handles health check requests
 type Handler struct {
 	db          *database.DB
+	mongo       *mongodb.Client
 	environment string
 }
 
-// NewHandler creates a new health handler
-func NewHandler(db *database.DB, environment string) *Handler {
-	return &Handler{db: db, environment: environment}
+// NewHandler creates a new health handler. mongo may be nil when the product
+// catalogue is disabled.
+func NewHandler(db *database.DB, mongo *mongodb.Client, environment string) *Handler {
+	return &Handler{db: db, mongo: mongo, environment: environment}
 }
 
 // HealthResponse represents the health check response
@@ -28,6 +36,7 @@ type HealthResponse struct {
 	Environment string          `json:"environment,omitempty"`
 	Timestamp   string          `json:"timestamp"`
 	Database    *DatabaseHealth `json:"database,omitempty"`
+	MongoDB     *DatabaseHealth `json:"mongodb,omitempty"`
 	Version     string          `json:"version,omitempty"`
 	Uptime      string          `json:"uptime,omitempty"`
 }
@@ -43,12 +52,12 @@ var startTime = time.Now()
 
 // Health returns the health status of the API
 // @Summary Health check
-// @Description Check if the API is running and database is accessible
+// @Description Check if the API is running and its databases are accessible. PostgreSQL is required; MongoDB (product catalogue) is reported but does not affect the status code.
 // @Tags Health
 // @Accept json
 // @Produce json
 // @Success 200 {object} HealthResponse
-// @Failure 503 {object} HealthResponse "Service unavailable if database is down"
+// @Failure 503 {object} HealthResponse "Service unavailable if PostgreSQL is down"
 // @Router /api/health [get]
 func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 	response := HealthResponse{
@@ -60,25 +69,39 @@ func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 		Version:     version.Get(),
 	}
 
-	// Check database health if database is available
+	ctx := r.Context()
+	var wg sync.WaitGroup
 	if h.db != nil {
-		dbHealth := h.checkDatabaseHealth(r.Context())
-		response.Database = &dbHealth
+		wg.Go(func() {
+			dbHealth := checkDependency(ctx, h.db.Health)
+			response.Database = &dbHealth
+		})
+	}
+	if h.mongo != nil {
+		wg.Go(func() {
+			mongoHealth := checkDependency(ctx, h.mongo.Health)
+			response.MongoDB = &mongoHealth
+		})
+	} else {
+		response.MongoDB = &DatabaseHealth{Status: "disabled"}
+	}
+	wg.Wait()
 
-		// If database is unhealthy, return 503
-		if dbHealth.Status != "ok" {
-			response.Status = "degraded"
-			httputil.WriteJSON(w, http.StatusServiceUnavailable, response)
-			return
-		}
+	if response.Database != nil && response.Database.Status != "ok" {
+		response.Status = "degraded"
+		httputil.WriteJSON(w, http.StatusServiceUnavailable, response)
+		return
 	}
 
 	httputil.WriteJSON(w, http.StatusOK, response)
 }
 
-func (h *Handler) checkDatabaseHealth(ctx context.Context) DatabaseHealth {
+func checkDependency(ctx context.Context, ping func(context.Context) error) DatabaseHealth {
+	ctx, cancel := context.WithTimeout(ctx, dependencyTimeout)
+	defer cancel()
+
 	start := time.Now()
-	err := h.db.Health(ctx)
+	err := ping(ctx)
 	duration := time.Since(start)
 
 	if err != nil {

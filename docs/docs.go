@@ -387,7 +387,7 @@ const docTemplate = `{
         },
         "/api/health": {
             "get": {
-                "description": "Check if the API is running and database is accessible",
+                "description": "Check if the API is running and its databases are accessible. PostgreSQL is required; MongoDB (product catalogue) is reported but does not affect the status code.",
                 "consumes": [
                     "application/json"
                 ],
@@ -406,9 +406,127 @@ const docTemplate = `{
                         }
                     },
                     "503": {
-                        "description": "Service unavailable if database is down",
+                        "description": "Service unavailable if PostgreSQL is down",
                         "schema": {
                             "$ref": "#/definitions/health.HealthResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/truecaller/callback": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Truecaller"
+                ],
+                "summary": "Truecaller callback",
+                "parameters": [
+                    {
+                        "description": "Truecaller callback",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_truecaller.CallbackRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/httputil.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/truecaller/start": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Truecaller"
+                ],
+                "summary": "Start Truecaller login",
+                "parameters": [
+                    {
+                        "description": "Request nonce",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_truecaller.StartRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Accepted",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/httputil.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/truecaller/status": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Truecaller"
+                ],
+                "summary": "Truecaller login status",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Request nonce",
+                        "name": "requestId",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_truecaller.StatusResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/httputil.ErrorResponse"
                         }
                     }
                 }
@@ -545,6 +663,106 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/identity.UserResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/httputil.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Patch the authenticated user's profile fields",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Users"
+                ],
+                "summary": "Update current user profile",
+                "parameters": [
+                    {
+                        "description": "Profile fields",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/identity.UpdateProfileRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/identity.UserResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/httputil.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/httputil.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/users/me/verify-phone": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Dummy OTP verification for the current user (accepts 123456 or any 6-digit code)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Users"
+                ],
+                "summary": "Verify phone with OTP",
+                "parameters": [
+                    {
+                        "description": "OTP payload",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/identity.VerifyPhoneRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/identity.UserResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/httputil.ErrorResponse"
                         }
                     },
                     "401": {
@@ -896,6 +1114,26 @@ const docTemplate = `{
                 }
             }
         },
+        "identity.UpdateProfileRequest": {
+            "type": "object",
+            "properties": {
+                "avatar_url": {
+                    "type": "string"
+                },
+                "bio": {
+                    "type": "string"
+                },
+                "city": {
+                    "type": "string"
+                },
+                "full_name": {
+                    "type": "string"
+                },
+                "phone": {
+                    "type": "string"
+                }
+            }
+        },
         "identity.UpdateUserRequest": {
             "type": "object",
             "required": [
@@ -915,10 +1153,22 @@ const docTemplate = `{
         "identity.User": {
             "type": "object",
             "properties": {
+                "avatar_url": {
+                    "type": "string"
+                },
+                "bio": {
+                    "type": "string"
+                },
+                "city": {
+                    "type": "string"
+                },
                 "created_at": {
                     "type": "string"
                 },
                 "email": {
+                    "type": "string"
+                },
+                "full_name": {
                     "type": "string"
                 },
                 "id": {
@@ -944,10 +1194,22 @@ const docTemplate = `{
         "identity.UserResponse": {
             "type": "object",
             "properties": {
+                "avatar_url": {
+                    "type": "string"
+                },
+                "bio": {
+                    "type": "string"
+                },
+                "city": {
+                    "type": "string"
+                },
                 "created_at": {
                     "type": "string"
                 },
                 "email": {
+                    "type": "string"
+                },
+                "full_name": {
                     "type": "string"
                 },
                 "id": {
@@ -958,6 +1220,9 @@ const docTemplate = `{
                 },
                 "phone": {
                     "type": "string"
+                },
+                "profile_completed_pct": {
+                    "type": "integer"
                 },
                 "status": {
                     "type": "string"
@@ -1000,6 +1265,19 @@ const docTemplate = `{
                 "RoleAdmin"
             ]
         },
+        "identity.VerifyPhoneRequest": {
+            "type": "object",
+            "required": [
+                "otp"
+            ],
+            "properties": {
+                "otp": {
+                    "type": "string",
+                    "maxLength": 8,
+                    "minLength": 4
+                }
+            }
+        },
         "health.DatabaseHealth": {
             "type": "object",
             "properties": {
@@ -1020,6 +1298,12 @@ const docTemplate = `{
                 "database": {
                     "$ref": "#/definitions/health.DatabaseHealth"
                 },
+                "environment": {
+                    "type": "string"
+                },
+                "mongodb": {
+                    "$ref": "#/definitions/health.DatabaseHealth"
+                },
                 "service": {
                     "type": "string"
                 },
@@ -1035,6 +1319,72 @@ const docTemplate = `{
                 "version": {
                     "type": "string"
                 }
+            }
+        },
+        "internal_truecaller.CallbackRequest": {
+            "type": "object",
+            "properties": {
+                "accessToken": {
+                    "type": "string"
+                },
+                "endpoint": {
+                    "type": "string"
+                },
+                "requestId": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_truecaller.Profile": {
+            "type": "object",
+            "properties": {
+                "avatarUrl": {
+                    "type": "string"
+                },
+                "countryCode": {
+                    "type": "string"
+                },
+                "email": {
+                    "type": "string"
+                },
+                "firstName": {
+                    "type": "string"
+                },
+                "lastName": {
+                    "type": "string"
+                },
+                "phone": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_truecaller.StartRequest": {
+            "type": "object",
+            "required": [
+                "requestId"
+            ],
+            "properties": {
+                "requestId": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_truecaller.StatusResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                },
+                "profile": {
+                    "$ref": "#/definitions/internal_truecaller.Profile"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "token": {
+                    "type": "string"
+                },
+                "user": {}
             }
         },
         "queue.Job": {
