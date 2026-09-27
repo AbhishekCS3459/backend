@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 )
 
@@ -15,6 +16,10 @@ var (
 	ErrNotFound      = errors.New("listing not found")
 	ErrAlreadyListed = errors.New("product is already listed in this store")
 	ErrForbidden     = errors.New("store not found")
+	// ErrVariantNotFound also covers variants of another retailer's products.
+	ErrVariantNotFound = errors.New("product not found")
+	// ErrSKUTaken: SKUs are unique per retailer (product_variant_retailer_sku_key).
+	ErrSKUTaken = errors.New("you already have a product with this SKU")
 )
 
 type Repository interface {
@@ -22,7 +27,7 @@ type Repository interface {
 	ListStoreProducts(ctx context.Context, storeID uuid.UUID, query, status string) ([]Listing, error)
 	StoreStats(ctx context.Context, storeID uuid.UUID) (*StoreSummary, error)
 	ListCatalog(ctx context.Context, retailerID, storeID uuid.UUID, query string) ([]CatalogItem, error)
-	AddListing(ctx context.Context, storeID, variantID uuid.UUID, qty, threshold int, available bool) (*Listing, error)
+	AddListing(ctx context.Context, retailerID, storeID uuid.UUID, req *AddRequest, available bool) (*Listing, error)
 	CreateAndList(ctx context.Context, retailerID, storeID uuid.UUID, req *CreateProductRequest) (*Listing, error)
 	UpdateListing(ctx context.Context, storeID, variantID uuid.UUID, req *UpdateRequest) (*Listing, error)
 	BulkUpdateListings(ctx context.Context, storeID uuid.UUID, items []BulkUpdateItem) (int, error)
@@ -164,29 +169,52 @@ func (r *repository) ListCatalog(ctx context.Context, retailerID, storeID uuid.U
 	return rows, nil
 }
 
-func (r *repository) AddListing(ctx context.Context, storeID, variantID uuid.UUID, qty, threshold int, available bool) (*Listing, error) {
-	var existing Inventory
-	err := r.db.WithContext(ctx).Where("store_id = ? AND product_variant_id = ?", storeID, variantID).First(&existing).Error
-	if err == nil {
-		return nil, ErrAlreadyListed
-	}
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, fmt.Errorf("check listing: %w", err)
-	}
+func (r *repository) AddListing(ctx context.Context, retailerID, storeID uuid.UUID, req *AddRequest, available bool) (*Listing, error) {
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var owned int64
+		err := tx.Table("product_variant v").
+			Joins("JOIN product p ON p.id = v.product_id").
+			Where("v.id = ? AND p.retailer_id = ?", req.VariantID, retailerID).
+			Count(&owned).Error
+		if err != nil {
+			return fmt.Errorf("check variant: %w", err)
+		}
+		if owned == 0 {
+			return ErrVariantNotFound
+		}
 
-	row := Inventory{
-		ID:                uuid.New(),
-		ProductVariantID:  variantID,
-		StoreID:           storeID,
-		QuantityAvailable: qty,
-		LowStockThreshold: threshold,
-		IsAvailable:       available,
-		UpdatedAt:         time.Now().UTC(),
+		var existing Inventory
+		err = tx.Where("store_id = ? AND product_variant_id = ?", storeID, req.VariantID).First(&existing).Error
+		if err == nil {
+			return ErrAlreadyListed
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("check listing: %w", err)
+		}
+
+		if req.Price != nil {
+			if err := tx.Model(&Variant{}).Where("id = ?", req.VariantID).Update("price", *req.Price).Error; err != nil {
+				return fmt.Errorf("update price: %w", err)
+			}
+		}
+		row := Inventory{
+			ID:                uuid.New(),
+			ProductVariantID:  req.VariantID,
+			StoreID:           storeID,
+			QuantityAvailable: req.QuantityAvailable,
+			LowStockThreshold: req.LowStockThreshold,
+			IsAvailable:       available,
+			UpdatedAt:         time.Now().UTC(),
+		}
+		if err := tx.Create(&row).Error; err != nil {
+			return fmt.Errorf("add listing: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
-	if err := r.db.WithContext(ctx).Create(&row).Error; err != nil {
-		return nil, fmt.Errorf("add listing: %w", err)
-	}
-	return r.FindListing(ctx, storeID, variantID)
+	return r.FindListing(ctx, storeID, req.VariantID)
 }
 
 func (r *repository) CreateAndList(ctx context.Context, retailerID, storeID uuid.UUID, req *CreateProductRequest) (*Listing, error) {
@@ -194,7 +222,7 @@ func (r *repository) CreateAndList(ctx context.Context, retailerID, storeID uuid
 	if req.IsAvailable != nil {
 		available = *req.IsAvailable
 	}
-	var listing *Listing
+	var variantID uuid.UUID
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		brandID, err := ensureNamed(tx, "brand", req.Brand)
 		if err != nil {
@@ -233,11 +261,16 @@ func (r *repository) CreateAndList(ctx context.Context, retailerID, storeID uuid
 		variant := Variant{
 			ID:           uuid.New(),
 			ProductID:    product.ID,
+			RetailerID:   retailerID,
 			VariantLabel: "Default",
 			SKU:          strings.TrimSpace(req.SKU),
 			Price:        req.Price,
 		}
 		if err := tx.Create(&variant).Error; err != nil {
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "product_variant_retailer_sku_key" {
+				return ErrSKUTaken
+			}
 			return err
 		}
 		inv := Inventory{
@@ -252,24 +285,13 @@ func (r *repository) CreateAndList(ctx context.Context, retailerID, storeID uuid
 		if err := tx.Create(&inv).Error; err != nil {
 			return err
 		}
+		variantID = variant.ID
 		return nil
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create product listing: %w", err)
 	}
-
-	// find by sku in store
-	var variantID uuid.UUID
-	if err := r.db.WithContext(ctx).Raw(`
-		SELECT v.id FROM product_variant v
-		JOIN product p ON p.id = v.product_id
-		WHERE p.retailer_id = ? AND v.sku = ?
-		ORDER BY v.created_at DESC LIMIT 1
-	`, retailerID, strings.TrimSpace(req.SKU)).Scan(&variantID).Error; err != nil {
-		return nil, err
-	}
-	listing, err = r.FindListing(ctx, storeID, variantID)
-	return listing, err
+	return r.FindListing(ctx, storeID, variantID)
 }
 
 func ensureNamed(tx *gorm.DB, table, name string) (uuid.UUID, error) {

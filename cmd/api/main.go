@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
 	"os/signal"
@@ -15,6 +17,7 @@ import (
 
 	"github.com/AbhishekCS3459/find-me-backend/internal/identity"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/database"
+	"github.com/AbhishekCS3459/find-me-backend/internal/platform/mongodb"
 )
 
 // @title           Find Me API
@@ -36,11 +39,30 @@ import (
 // @description Type "Bearer" followed by a space and JWT token.
 
 func main() {
-	// Load .env file if it exists (for local development)
-	_ = godotenv.Load()
+	loadEnvFiles()
 
 	if err := run(); err != nil {
 		log.Fatal().Err(err).Msg("server stopped with error")
+	}
+}
+
+// loadEnvFiles loads .env files for ENVIRONMENT (default "development").
+// The first file to define a key wins, and variables already set in the process
+// environment (e.g. Azure App Settings) are never overridden.
+func loadEnvFiles() {
+	env := os.Getenv("ENVIRONMENT")
+	if env == "" {
+		env = "development"
+	}
+	files := []string{".env." + env + ".local"}
+	if env != "test" {
+		files = append(files, ".env.local")
+	}
+	files = append(files, ".env."+env, ".env")
+	for _, file := range files {
+		if err := godotenv.Load(file); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			log.Warn().Err(err).Str("file", file).Msg("failed to load env file")
+		}
 	}
 }
 
@@ -63,6 +85,17 @@ func run() error {
 	}
 	defer db.Close()
 
+	mongoClient := connectMongo(ctx, cfg.MongoDBURL)
+	if mongoClient != nil {
+		defer func() {
+			closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := mongoClient.Close(closeCtx); err != nil {
+				log.Error().Err(err).Msg("mongodb close failed")
+			}
+		}()
+	}
+
 	userService := identity.NewService(identity.NewRepository(db.Pool), cfg.JWTSecret)
 	err = userService.BootstrapAdmin(ctx, cfg.BootstrapAdminEmail, cfg.BootstrapAdminPassword, cfg.BootstrapAdminPhone)
 	if err != nil {
@@ -70,7 +103,7 @@ func run() error {
 	}
 
 	// Setup routes
-	router := SetupRoutes(db, cfg)
+	router := SetupRoutes(db, mongoClient, cfg)
 
 	// Create HTTP server
 	server := &http.Server{
@@ -86,6 +119,7 @@ func run() error {
 		log.Info().
 			Str("addr", server.Addr).
 			Str("environment", cfg.Environment).
+			Str("database", cfg.DatabaseTarget()).
 			Str("log_level", cfg.LogLevel).
 			Msg("server starting")
 
@@ -111,6 +145,21 @@ func run() error {
 
 	log.Info().Msg("server exited")
 	return nil
+}
+
+// connectMongo returns nil when MongoDB is not configured or unreachable, so the
+// rest of the API keeps serving while the catalogue is unavailable.
+func connectMongo(ctx context.Context, uri string) *mongodb.Client {
+	if uri == "" {
+		log.Warn().Msg("DATABASE_URL_MONGODB_PROD not set; product catalogue disabled")
+		return nil
+	}
+	client, err := mongodb.Connect(ctx, uri)
+	if err != nil {
+		log.Error().Err(err).Msg("mongodb connection failed; product catalogue disabled")
+		return nil
+	}
+	return client
 }
 
 // setupLogging configures the global logger

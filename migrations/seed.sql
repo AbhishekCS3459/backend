@@ -121,14 +121,14 @@ BEGIN
     -- -----------------------------------------------------------------
     -- PRODUCTS + variants + images + inventory
     -- -----------------------------------------------------------------
-    INSERT INTO product (store_id, category_id, brand_id, name, description, attributes, status)
-    VALUES (v_store_id, v_category_child_id, v_brand_id,
+    INSERT INTO product (retailer_id, store_id, category_id, brand_id, name, description, attributes, status)
+    VALUES (v_retailer_id, v_store_id, v_category_child_id, v_brand_id,
             'Paracetamol 500mg Tablets', 'Fever and pain relief tablets, strip of 10',
             '{"dosage": "500mg", "form": "tablet", "prescription_required": false}'::jsonb, 'ACTIVE')
     RETURNING id INTO v_product_1_id;
 
-    INSERT INTO product (store_id, category_id, brand_id, name, description, attributes, status)
-    VALUES (v_store_id, v_category_child_id, v_brand_id,
+    INSERT INTO product (retailer_id, store_id, category_id, brand_id, name, description, attributes, status)
+    VALUES (v_retailer_id, v_store_id, v_category_child_id, v_brand_id,
             'Paracetamol Syrup for Kids', 'Sugar-free paracetamol syrup, 60ml bottle',
             '{"dosage": "120mg/5ml", "form": "syrup", "prescription_required": false}'::jsonb, 'ACTIVE')
     RETURNING id INTO v_product_2_id;
@@ -138,12 +138,12 @@ BEGIN
         (v_product_1_id, 'https://example.com/products/paracetamol_tab_1.jpg', 0),
         (v_product_2_id, 'https://example.com/products/paracetamol_syrup_1.jpg', 0);
 
-    INSERT INTO product_variant (product_id, variant_label, sku, price)
-    VALUES (v_product_1_id, 'Strip of 10', 'PARA-TAB-500-10', 25.00)
+    INSERT INTO product_variant (product_id, retailer_id, variant_label, sku, price)
+    VALUES (v_product_1_id, v_retailer_id, 'Strip of 10', 'PARA-TAB-500-10', 25.00)
     RETURNING id INTO v_variant_1_id;
 
-    INSERT INTO product_variant (product_id, variant_label, sku, price)
-    VALUES (v_product_2_id, '60ml Bottle', 'PARA-SYR-60ML', 45.00)
+    INSERT INTO product_variant (product_id, retailer_id, variant_label, sku, price)
+    VALUES (v_product_2_id, v_retailer_id, '60ml Bottle', 'PARA-SYR-60ML', 45.00)
     RETURNING id INTO v_variant_2_id;
 
     INSERT INTO inventory (product_variant_id, store_id, quantity_available, quantity_reserved, low_stock_threshold)

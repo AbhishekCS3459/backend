@@ -1,15 +1,15 @@
-.PHONY: help swagger swagger-serve build run run-dev dev stop lint lint-fix fmt vet test test-coverage test-utils bench-utils test-setup check migrate-up migrate-down migrate-create migrate-status docker-up docker-down docker-build clean
+.PHONY: help swagger swagger-serve build run run-prod run-dev dev stop lint lint-fix fmt vet test test-coverage test-utils bench-utils test-setup check migrate-up migrate-down migrate-create migrate-status docker-up docker-down docker-build clean catalog-indexes catalog-cleanup-preview catalog-prepare
 
 # Local development database 
 DEV_DATABASE_URL=postgresql://postgres:postgres@localhost:5434/find_me?sslmode=disable
-# Production database # Set this in your shell:
-
+# Production database: read from .env.production, or override in your shell:
 # export PROD_DATABASE_URL='postgresql://user:password@host:5432/database?sslmode=require'
-PROD_DATABASE_URL ?=
+PROD_DATABASE_URL ?= $(shell sed -n 's/^DATABASE_URL=//p' .env.production 2>/dev/null | tail -1)
 # Default target
 help:
 	@echo "Available commands:"
-	@echo "  make run              - Run the API server"
+	@echo "  make run              - Run the API server (.env.development, local database)"
+	@echo "  make run-prod         - Run the API server locally against PROD (.env.production)"
 	@echo "  make run-dev          - Run the API server with live reload (Air)"
 	@echo "  make dev              - Start database and run API with live reload"
 	@echo "  make stop             - Stop the running API server"
@@ -37,6 +37,9 @@ help:
 	@echo "  make redis-down       - Stop Redis container"
 	@echo "  make redis-test       - Start Redis and run Redis queue tests"
 	@echo "  make clean            - Clean build artifacts"
+	@echo "  make catalog-cleanup-preview - Show what catalog-prepare would change (MongoDB catalogue)"
+	@echo "  make catalog-prepare  - After a catalogue upload: remove platform/url/city/locality/address/scrapedAt, build search, ensure indexes"
+	@echo "  make catalog-indexes  - Create the MongoDB catalogue indexes and the product_search Atlas Search index"
 
 # Generate Swagger docs from code annotations
 swagger:
@@ -56,12 +59,7 @@ swagger:
 swagger-serve: swagger
 	@echo "Starting Swagger UI server..."
 	@echo "Open http://localhost:$${PORT:-8080}/swagger/index.html"
-	@DATABASE_URL="$${DATABASE_URL:-postgresql://postgres:postgres@localhost:5434/find_me?sslmode=disable}" \
-	JWT_SECRET="$${JWT_SECRET:-dev-secret-change-in-production}" \
-	PORT="$${PORT:-8080}" \
-	ENVIRONMENT="$${ENVIRONMENT:-development}" \
-	LOG_LEVEL="$${LOG_LEVEL:-info}" \
-	go run ./cmd/api
+	@ENVIRONMENT="$${ENVIRONMENT:-development}" go run ./cmd/api
 
 # Build the application
 build:
@@ -71,8 +69,33 @@ build:
 
 # Run the application
 run:
-	@echo "Starting API server..."
-	@go run ./cmd/api
+	@echo "Starting API server (development)..."
+	@ENVIRONMENT=development go run ./cmd/api
+
+# Create the MongoDB and Atlas Search indexes the product catalogue needs (idempotent)
+catalog-indexes:
+	@go run ./cmd/catalog-indexes
+
+# Show what catalog-prepare would change, without writing anything
+catalog-cleanup-preview:
+	@go run ./cmd/catalog-cleanup
+
+# Run after every catalogue upload: removes platform, url, city, locality,
+# address and scrapedAt, builds the normalized
+# "search" field, and ensures the indexes. Safe to re-run; only products that
+# need changes are written.
+catalog-prepare:
+	@go run ./cmd/catalog-cleanup -apply
+	@go run ./cmd/catalog-indexes
+
+# Run the application locally against the production database
+run-prod:
+	@if [ ! -f .env.production ]; then \
+		echo "❌ .env.production not found. Create it with: cp .env.production.example .env.production"; \
+		exit 1; \
+	fi
+	@echo "⚠️  Starting API server against the PRODUCTION database. Writes affect real data."
+	@ENVIRONMENT=production go run ./cmd/api
 
 # Run the application with live reload (Air)
 run-dev:
@@ -107,12 +130,7 @@ run-dev:
 		exit 1; \
 	fi; \
 	echo "Using Air: $$AIR_CMD"; \
-	DATABASE_URL="$${DATABASE_URL:-postgresql://postgres:postgres@localhost:5434/find_me?sslmode=disable}" \
-	JWT_SECRET="$${JWT_SECRET:-dev-secret-change-in-production}" \
-	PORT="$${PORT:-8080}" \
-	ENVIRONMENT="$${ENVIRONMENT:-development}" \
-	LOG_LEVEL="$${LOG_LEVEL:-info}" \
-	$$AIR_CMD
+	ENVIRONMENT="$${ENVIRONMENT:-development}" $$AIR_CMD
 
 # Start database and run API with live reload (convenience command)
 dev:

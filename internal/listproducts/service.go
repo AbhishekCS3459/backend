@@ -70,14 +70,15 @@ func (s *service) Catalog(ctx context.Context, userID, storeID uuid.UUID, query 
 }
 
 func (s *service) Add(ctx context.Context, userID, storeID uuid.UUID, req *AddRequest) (*Listing, error) {
-	if _, err := s.assertOwned(ctx, userID, storeID); err != nil {
+	retailerID, err := s.assertOwned(ctx, userID, storeID)
+	if err != nil {
 		return nil, err
 	}
 	available := true
 	if req.IsAvailable != nil {
 		available = *req.IsAvailable
 	}
-	return s.repo.AddListing(ctx, storeID, req.VariantID, req.QuantityAvailable, req.LowStockThreshold, available)
+	return s.repo.AddListing(ctx, retailerID, storeID, req, available)
 }
 
 func (s *service) Create(ctx context.Context, userID, storeID uuid.UUID, req *CreateProductRequest) (*Listing, error) {
@@ -115,8 +116,12 @@ func MapError(err error) (int, string) {
 		return 404, "store not found"
 	case errors.Is(err, ErrNotFound):
 		return 404, "product listing not found"
+	case errors.Is(err, ErrVariantNotFound):
+		return 404, "product not found"
 	case errors.Is(err, ErrAlreadyListed):
 		return 409, "product is already listed in this store"
+	case errors.Is(err, ErrSKUTaken):
+		return 409, "you already have a product with this SKU"
 	default:
 		return 500, "request failed"
 	}

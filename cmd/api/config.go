@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -17,6 +18,10 @@ type Config struct {
 	// Database
 	DatabaseURL string
 
+	// MongoDB (optional - product catalogue)
+	MongoDBURL             string
+	MongoCatalogDatabase   string
+	MongoCatalogCollection string
 	// JWT
 	JWTSecret string
 
@@ -55,6 +60,9 @@ func LoadConfig() (*Config, error) {
 		return nil, fmt.Errorf("required environment variable DATABASE_URL is not set")
 	}
 
+	cfg.MongoDBURL = getEnv("DATABASE_URL_MONGODB_PROD", "")
+	cfg.MongoCatalogDatabase = getEnv("MONGODB_CATALOG_DATABASE", "catalog")
+	cfg.MongoCatalogCollection = getEnv("MONGODB_CATALOG_COLLECTION", "products")
 	// JWT - required in production, but has default for development
 	cfg.JWTSecret = getEnv("JWT_SECRET", "dev-secret-change-in-production")
 	if cfg.JWTSecret == "dev-secret-change-in-production" && cfg.Environment == "production" {
@@ -81,6 +89,15 @@ func LoadConfig() (*Config, error) {
 	cfg.BootstrapAdminPhone = getEnv("BOOTSTRAP_ADMIN_PHONE", "+10000000000")
 
 	return cfg, nil
+}
+
+// DatabaseTarget returns host/database from DatabaseURL without credentials, for logging.
+func (c *Config) DatabaseTarget() string {
+	u, err := url.Parse(c.DatabaseURL)
+	if err != nil || u.Host == "" {
+		return "unknown"
+	}
+	return u.Host + u.Path
 }
 
 // getEnv gets an environment variable or returns a default value

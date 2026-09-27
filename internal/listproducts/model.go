@@ -57,6 +57,7 @@ func (Product) TableName() string { return "product" }
 type Variant struct {
 	ID           uuid.UUID `json:"id" gorm:"type:uuid;primaryKey"`
 	ProductID    uuid.UUID `json:"product_id" gorm:"type:uuid"`
+	RetailerID   uuid.UUID `json:"retailer_id" gorm:"type:uuid"`
 	VariantLabel string    `json:"variant_label"`
 	SKU          string    `json:"sku"`
 	Price        float64   `json:"price"`
@@ -137,10 +138,13 @@ type CatalogItem struct {
 }
 
 type AddRequest struct {
-	VariantID         uuid.UUID `json:"variant_id" validate:"required"`
-	QuantityAvailable int       `json:"quantity_available" validate:"min=0"`
-	LowStockThreshold int       `json:"low_stock_threshold" validate:"min=0"`
-	IsAvailable       *bool     `json:"is_available"`
+	VariantID uuid.UUID `json:"variant_id" validate:"required"`
+	// Price, when set, becomes the product's selling price. Prices belong to the
+	// retailer's product, so the change applies to every store that lists it.
+	Price             *float64 `json:"price" validate:"omitnil,gt=0"`
+	QuantityAvailable int      `json:"quantity_available" validate:"min=0"`
+	LowStockThreshold int      `json:"low_stock_threshold" validate:"min=0"`
+	IsAvailable       *bool    `json:"is_available"`
 }
 
 type CreateProductRequest struct {

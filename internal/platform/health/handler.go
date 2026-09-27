@@ -12,22 +12,24 @@ import (
 
 // Handler handles health check requests
 type Handler struct {
-	db *database.DB
+	db          *database.DB
+	environment string
 }
 
 // NewHandler creates a new health handler
-func NewHandler(db *database.DB) *Handler {
-	return &Handler{db: db}
+func NewHandler(db *database.DB, environment string) *Handler {
+	return &Handler{db: db, environment: environment}
 }
 
 // HealthResponse represents the health check response
 type HealthResponse struct {
-	Status    string          `json:"status"`
-	Service   string          `json:"service"`
-	Timestamp string          `json:"timestamp"`
-	Database  *DatabaseHealth `json:"database,omitempty"`
-	Version   string          `json:"version,omitempty"`
-	Uptime    string          `json:"uptime,omitempty"`
+	Status      string          `json:"status"`
+	Service     string          `json:"service"`
+	Environment string          `json:"environment,omitempty"`
+	Timestamp   string          `json:"timestamp"`
+	Database    *DatabaseHealth `json:"database,omitempty"`
+	Version     string          `json:"version,omitempty"`
+	Uptime      string          `json:"uptime,omitempty"`
 }
 
 // DatabaseHealth represents database health status
@@ -50,11 +52,12 @@ var startTime = time.Now()
 // @Router /api/health [get]
 func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 	response := HealthResponse{
-		Status:    "ok",
-		Service:   "find-me-backend",
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
-		Uptime:    time.Since(startTime).String(),
-		Version:   version.Get(),
+		Status:      "ok",
+		Service:     "find-me-backend",
+		Environment: h.environment,
+		Timestamp:   time.Now().UTC().Format(time.RFC3339),
+		Uptime:      time.Since(startTime).String(),
+		Version:     version.Get(),
 	}
 
 	// Check database health if database is available
