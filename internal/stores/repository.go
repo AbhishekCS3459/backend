@@ -116,10 +116,10 @@ func (r *repository) attachSummary(ctx context.Context, store Store) (*Summary, 
 	_ = r.db.WithContext(ctx).Raw(`
 		SELECT
 			COUNT(*)::int,
-			COALESCE(SUM(quantity_available), 0)::int,
-			COALESCE(SUM(CASE WHEN quantity_available = 0 OR quantity_available <= low_stock_threshold THEN 1 ELSE 0 END), 0)::int
+			COALESCE(SUM(on_hand_quantity), 0)::int,
+			COALESCE(SUM(CASE WHEN on_hand_quantity - reserved_quantity <= low_stock_threshold THEN 1 ELSE 0 END), 0)::int
 		FROM inventory
-		WHERE store_id = ?
+		WHERE store_id = ? AND unlisted_at IS NULL
 	`, store.ID).Row().Scan(&productCount, &totalInventory, &lowStock)
 
 	return &Summary{

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/AbhishekCS3459/find-me-backend/internal/inventory"
 	"github.com/AbhishekCS3459/find-me-backend/internal/storeaccess"
 	"github.com/google/uuid"
 )
@@ -14,7 +15,6 @@ type Service interface {
 	Add(ctx context.Context, userID, storeID uuid.UUID, req *AddRequest) (*Listing, error)
 	Create(ctx context.Context, userID, storeID uuid.UUID, req *CreateProductRequest) (*Listing, error)
 	Update(ctx context.Context, userID, storeID, variantID uuid.UUID, req *UpdateRequest) (*Listing, error)
-	BulkUpdate(ctx context.Context, userID, storeID uuid.UUID, req *BulkUpdateRequest) (int, error)
 	Remove(ctx context.Context, userID, storeID, variantID uuid.UUID) error
 }
 
@@ -71,7 +71,7 @@ func (s *service) Add(ctx context.Context, userID, storeID uuid.UUID, req *AddRe
 	if req.IsAvailable != nil {
 		available = *req.IsAvailable
 	}
-	return s.repo.AddListing(ctx, retailerID, storeID, req, available)
+	return s.repo.AddListing(ctx, userID, retailerID, storeID, req, available)
 }
 
 func (s *service) Create(ctx context.Context, userID, storeID uuid.UUID, req *CreateProductRequest) (*Listing, error) {
@@ -79,7 +79,7 @@ func (s *service) Create(ctx context.Context, userID, storeID uuid.UUID, req *Cr
 	if err != nil {
 		return nil, err
 	}
-	return s.repo.CreateAndList(ctx, retailerID, storeID, req)
+	return s.repo.CreateAndList(ctx, userID, retailerID, storeID, req)
 }
 
 func (s *service) Update(ctx context.Context, userID, storeID, variantID uuid.UUID, req *UpdateRequest) (*Listing, error) {
@@ -89,13 +89,6 @@ func (s *service) Update(ctx context.Context, userID, storeID, variantID uuid.UU
 	return s.repo.UpdateListing(ctx, storeID, variantID, req)
 }
 
-func (s *service) BulkUpdate(ctx context.Context, userID, storeID uuid.UUID, req *BulkUpdateRequest) (int, error) {
-	if _, err := s.authorize(ctx, userID, storeID, storeaccess.InventoryUpdate); err != nil {
-		return 0, err
-	}
-	return s.repo.BulkUpdateListings(ctx, storeID, req.Items)
-}
-
 func (s *service) Remove(ctx context.Context, userID, storeID, variantID uuid.UUID) error {
 	if _, err := s.authorize(ctx, userID, storeID, storeaccess.CatalogManage); err != nil {
 		return err
@@ -103,21 +96,17 @@ func (s *service) Remove(ctx context.Context, userID, storeID, variantID uuid.UU
 	return s.repo.RemoveListing(ctx, storeID, variantID)
 }
 
+// MapError handles listing errors and defers to the inventory module for
+// store access and stock errors raised by the ledger.
 func MapError(err error) (int, string) {
 	switch {
-	case errors.Is(err, storeaccess.ErrNotFound):
-		return 404, "store not found"
-	case errors.Is(err, storeaccess.ErrForbidden):
-		return 403, err.Error()
-	case errors.Is(err, ErrNotFound):
+	case errors.Is(err, ErrNotFound), errors.Is(err, inventory.ErrNotFound):
 		return 404, "product listing not found"
 	case errors.Is(err, ErrVariantNotFound):
 		return 404, "product not found"
-	case errors.Is(err, ErrAlreadyListed):
-		return 409, "product is already listed in this store"
 	case errors.Is(err, ErrSKUTaken):
 		return 409, "you already have a product with this SKU"
 	default:
-		return 500, "request failed"
+		return inventory.MapError(err)
 	}
 }

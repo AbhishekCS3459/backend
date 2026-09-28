@@ -1,0 +1,20 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # The API runs on the host (`make run`), so Prometheus reaches it through
+  # Docker's host gateway. Change the port if PORT in .env is not 8080.
+  - job_name: find-me-api
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["host.docker.internal:8080"]
+        labels:
+          env: local

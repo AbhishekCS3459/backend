@@ -33,45 +33,60 @@ curl http://localhost:8080/metrics | grep http_request_duration_seconds
 
 **Use case:** Quick health checks, debugging, manual monitoring
 
-### Option 2: Prometheus Server (Production Monitoring)
+### Option 2: Prometheus + Grafana in Docker (recommended)
 
-Set up Prometheus to scrape and store metrics:
+Nothing needs to be installed locally besides Docker. Both services are defined in
+`docker-compose.yml` and configured from the `monitoring/` folder:
 
-#### 1. Install Prometheus
+```text
+monitoring/
+├── prometheus/
+│   ├── prometheus.yml   # scrape config (API at host.docker.internal:8080)
+│   └── alerts.yml       # ApiDown, HighErrorRate, SlowResponses
+└── grafana/
+    ├── provisioning/    # Prometheus data source + dashboard provider
+    └── dashboards/
+        └── find-me-api.json
+```
+
+#### 1. Start the API and the monitoring stack
 
 ```bash
-# macOS
-brew install prometheus
-
-# Or download from https://prometheus.io/download/
+make run             # API on the host, port 8080
+make monitoring-up   # docker compose up -d prometheus grafana
 ```
 
-#### 2. Create `prometheus.yml`
+| Service    | URL                                            | Login           |
+| ---------- | ---------------------------------------------- | --------------- |
+| Prometheus | [localhost:9090](http://localhost:9090)        | -               |
+| Grafana    | [localhost:3001](http://localhost:3001)        | `admin`/`admin` |
 
-```yaml
-global:
-  scrape_interval: 15s  # How often to scrape
-  evaluation_interval: 15s
-
-scrape_configs:
-  - job_name: 'go-api'
-    static_configs:
-      - targets: ['localhost:8080']  # Your API endpoint
-```
-
-#### 3. Start Prometheus
-
-```bash
-prometheus --config.file=prometheus.yml
-```
+Grafana uses port 3001 because the retailer UI dev server already uses 3000.
 
 Prometheus will:
 
-- Scrape `/metrics` every 15 seconds
-- Store historical data
-- Provide a query interface at `http://localhost:9090`
+- Scrape the API's `/metrics` every 15 seconds
+- Keep 15 days of history in the `prometheus_data` volume
+- Evaluate the alert rules in `monitoring/prometheus/alerts.yml`
 
-#### 4. Query Metrics in Prometheus UI
+Check that the API target is `UP` at [localhost:9090/targets](http://localhost:9090/targets).
+If `PORT` in `.env` is not `8080`, change the target in `monitoring/prometheus/prometheus.yml`
+and reload Prometheus:
+
+```bash
+curl -X POST http://localhost:9090/-/reload
+```
+
+Stop everything with `make monitoring-down` (data is kept in Docker volumes).
+
+#### 2. Route labels
+
+The `path` label is the matched chi route, not the raw URL. For example, every
+`/api/stores/<uuid>/products` request is recorded as `/api/stores/{storeID}/products`,
+and requests that match no route are recorded as `unmatched`. This keeps the number of
+time series bounded no matter how many stores or IDs exist.
+
+#### 3. Query Metrics in Prometheus UI
 
 Open `http://localhost:9090` and try these queries:
 
@@ -108,83 +123,49 @@ sum by (path) (rate(http_requests_total[5m]))
 ##### 95th percentile latency
 
 ```text
-histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))
+histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))
 ```
 
 ### Option 3: Grafana Dashboards (Visualization)
 
-Grafana provides beautiful dashboards for metrics:
+Grafana starts with `make monitoring-up`, so there is nothing to install and no data source to add by hand.
 
-#### 1. Install Grafana
+1. Open [localhost:3001](http://localhost:3001) and log in with `admin` / `admin`.
+2. The **Find Me API** dashboard (folder **Find Me**) opens as the home page. It is provisioned from
+   `monitoring/grafana/dashboards/find-me-api.json` and uses the provisioned **Prometheus** data source
+   (`http://prometheus:9090` inside the Docker network).
 
-```bash
-# macOS
-brew install grafana
+The dashboard shows:
 
-# Or Docker
-docker run -d -p 3000:3000 grafana/grafana
-```
+| Panel                        | Query (simplified)                                                        |
+| ---------------------------- | ------------------------------------------------------------------------- |
+| API up                       | `up{job="find-me-api"}`                                                   |
+| Requests / sec               | `sum(rate(http_requests_total[5m]))`                                      |
+| 5xx error rate               | 5xx requests / all requests                                               |
+| p95 latency                  | `histogram_quantile(0.95, sum by (le) (rate(..._bucket[5m])))`            |
+| Requests / sec by route      | `sum by (method, path) (rate(http_requests_total[5m]))`                   |
+| Latency percentiles          | p50, p95, p99                                                             |
+| Errors by route (4xx / 5xx)  | `sum by (status, path) (rate(http_requests_total{status=~"[45].."}[5m]))` |
+| Slowest routes (p95)         | `topk(10, histogram_quantile(0.95, sum by (le, path) (...)))`             |
+| Goroutines, Memory           | `go_goroutines`, `go_memstats_heap_alloc_bytes`, `process_resident_memory_bytes` |
 
-#### 2. Add Prometheus as Data Source
+Scrapes of `/metrics` itself are excluded from the traffic panels.
 
-1. Open `http://localhost:3000`
-2. Login (admin/admin)
-3. Add data source → Prometheus
-4. URL: `http://localhost:9090`
+To change the dashboard, edit it in Grafana, export the JSON (Share → Export), and save it over
+`monitoring/grafana/dashboards/find-me-api.json` so the change is kept in git.
 
-#### 3. Create Dashboard
+### Option 4: Alerting
 
-##### Panel 1: Request Rate
+Alert rules live in `monitoring/prometheus/alerts.yml` and are loaded automatically:
 
-- Query: `rate(http_requests_total[5m])`
-- Visualization: Graph
-- Title: "Requests per Second"
+| Alert           | Fires when                                            |
+| --------------- | ----------------------------------------------------- |
+| `ApiDown`       | Prometheus cannot scrape the API for 1 minute         |
+| `HighErrorRate` | More than 5% of requests return 5xx for 5 minutes     |
+| `SlowResponses` | p95 latency is above 1 second for 5 minutes           |
 
-##### Panel 2: Response Time
-
-- Query: `histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))`
-- Visualization: Graph
-- Title: "95th Percentile Latency"
-
-##### Panel 3: Error Rate
-
-- Query: `rate(http_requests_total{status=~"5.."}[5m])`
-- Visualization: Graph
-- Title: "Error Rate"
-
-##### Panel 4: Top Endpoints
-
-- Query: `topk(10, sum by (path) (rate(http_requests_total[5m])))`
-- Visualization: Table
-- Title: "Top 10 Endpoints"
-
-### Option 4: Alerting (Production)
-
-Set up alerts based on metrics:
-
-```yaml
-# prometheus.yml
-rule_files:
-  - alerts.yml
-```
-
-```yaml
-# alerts.yml
-groups:
-  - name: api_alerts
-    rules:
-      - alert: HighErrorRate
-        expr: rate(http_requests_total{status=~"5.."}[5m]) > 0.1
-        for: 5m
-        annotations:
-          summary: "High error rate detected"
-      
-      - alert: SlowResponseTime
-        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 1
-        for: 5m
-        annotations:
-          summary: "95th percentile latency > 1s"
-```
+See their state at [localhost:9090/alerts](http://localhost:9090/alerts). Sending notifications
+(email, Slack) needs an Alertmanager, which is not part of the local stack.
 
 ## Common Use Cases
 
@@ -214,31 +195,10 @@ groups:
 
 ## Quick Start (Docker Compose)
 
-Add to `docker-compose.yml`:
-
-```yaml
-services:
-  prometheus:
-    image: prom/prometheus:latest
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-
-  grafana:
-    image: grafana/grafana:latest
-    ports:
-      - "3000:3000"
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-```
-
-Then:
-
 ```bash
-docker-compose up -d prometheus grafana
+make run             # API on :8080
+make monitoring-up   # Prometheus on :9090, Grafana on :3001
+make monitoring-down # stop both
 ```
 
 ## Example Queries
@@ -269,9 +229,8 @@ sum by (method) (rate(http_requests_total[5m]))
 
 ## Next Steps
 
-1. **Development**: Just curl `/metrics` for quick checks
-2. **Staging**: Set up Prometheus to scrape metrics
-3. **Production**: Add Grafana dashboards and alerts
+1. **Development**: `make monitoring-up` and open the Grafana dashboard
+2. **Production**: `/metrics` is public today; restrict it (private network, IP allow-list or auth) before pointing a hosted Prometheus or Grafana Cloud at the Azure API
 
 ## Resources
 

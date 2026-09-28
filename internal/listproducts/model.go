@@ -74,19 +74,6 @@ type Image struct {
 
 func (Image) TableName() string { return "product_image" }
 
-type Inventory struct {
-	ID                uuid.UUID `json:"id" gorm:"type:uuid;primaryKey"`
-	ProductVariantID  uuid.UUID `json:"product_variant_id" gorm:"type:uuid"`
-	StoreID           uuid.UUID `json:"store_id" gorm:"type:uuid"`
-	QuantityAvailable int       `json:"quantity_available"`
-	QuantityReserved  int       `json:"quantity_reserved"`
-	LowStockThreshold int       `json:"low_stock_threshold"`
-	IsAvailable       bool      `json:"is_available"`
-	UpdatedAt         time.Time `json:"updated_at"`
-}
-
-func (Inventory) TableName() string { return "inventory" }
-
 type Brand struct {
 	ID   uuid.UUID `json:"id" gorm:"type:uuid;primaryKey"`
 	Name string    `json:"name"`
@@ -111,15 +98,17 @@ type Listing struct {
 	Category          string    `json:"category"`
 	ImageURL          string    `json:"image_url"`
 	Price             float64   `json:"price"`
-	QuantityAvailable int       `json:"quantity_available"`
-	QuantityReserved  int       `json:"quantity_reserved"`
+	OnHand            int       `json:"on_hand"`
+	Reserved          int       `json:"reserved"`
+	Available         int       `json:"available"`
 	LowStockThreshold int       `json:"low_stock_threshold"`
 	IsAvailable       bool      `json:"is_available"`
 	StockStatus       string    `json:"stock_status"`
 }
 
 type StoreSummary struct {
-	ProductCount    int `json:"product_count"`
+	ProductCount int `json:"product_count"`
+	// TotalInventory is the units on hand across the store's listed products.
 	TotalInventory  int `json:"total_inventory"`
 	LowStockCount   int `json:"low_stock_count"`
 	OutOfStockCount int `json:"out_of_stock_count"`
@@ -141,10 +130,12 @@ type AddRequest struct {
 	VariantID uuid.UUID `json:"variant_id" validate:"required"`
 	// Price, when set, becomes the product's selling price. Prices belong to the
 	// retailer's product, so the change applies to every store that lists it.
-	Price             *float64 `json:"price" validate:"omitnil,gt=0"`
-	QuantityAvailable int      `json:"quantity_available" validate:"min=0"`
-	LowStockThreshold int      `json:"low_stock_threshold" validate:"min=0"`
-	IsAvailable       *bool    `json:"is_available"`
+	Price *float64 `json:"price" validate:"omitnil,gt=0"`
+	// OpeningQuantity, when above zero, is recorded as a STOCK_RECEIVED
+	// inventory transaction in the same database transaction as the listing.
+	OpeningQuantity   int   `json:"opening_quantity" validate:"min=0,max=1000000"`
+	LowStockThreshold int   `json:"low_stock_threshold" validate:"min=0"`
+	IsAvailable       *bool `json:"is_available"`
 }
 
 type CreateProductRequest struct {
@@ -154,24 +145,17 @@ type CreateProductRequest struct {
 	SKU               string  `json:"sku" validate:"required,min=2,max=255"`
 	Price             float64 `json:"price" validate:"required,gt=0"`
 	ImageURL          string  `json:"image_url"`
-	QuantityAvailable int     `json:"quantity_available" validate:"min=0"`
+	OpeningQuantity   int     `json:"opening_quantity" validate:"min=0,max=1000000"`
 	LowStockThreshold int     `json:"low_stock_threshold" validate:"min=0"`
 	IsAvailable       *bool   `json:"is_available"`
 }
 
+// UpdateRequest changes listing settings only. Stock changes go through the
+// inventory receive and adjust endpoints so every change is recorded.
 type UpdateRequest struct {
-	QuantityAvailable *int  `json:"quantity_available"`
-	LowStockThreshold *int  `json:"low_stock_threshold"`
+	LowStockThreshold *int  `json:"low_stock_threshold" validate:"omitnil,min=0"`
 	IsAvailable       *bool `json:"is_available"`
-}
-
-type BulkUpdateItem struct {
-	VariantID         uuid.UUID `json:"variant_id" validate:"required"`
-	QuantityAvailable *int      `json:"quantity_available" validate:"omitnil,min=0"`
-	LowStockThreshold *int      `json:"low_stock_threshold" validate:"omitnil,min=0"`
-	IsAvailable       *bool     `json:"is_available"`
-}
-
-type BulkUpdateRequest struct {
-	Items []BulkUpdateItem `json:"items" validate:"required,min=1,max=500,dive"`
+	// QuantityAvailable is accepted only to reject it with a pointer to the
+	// inventory API instead of silently ignoring it.
+	QuantityAvailable *int `json:"quantity_available"`
 }

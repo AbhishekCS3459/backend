@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -48,6 +49,10 @@ var (
 	)
 )
 
+// unmatchedRoute labels requests that hit no route, so scanners probing random
+// URLs cannot create unbounded label values.
+const unmatchedRoute = "unmatched"
+
 // Metrics middleware records Prometheus metrics for HTTP requests
 func Metrics(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -56,23 +61,32 @@ func Metrics(next http.Handler) http.Handler {
 		// Wrap response writer to capture status code and size
 		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
 
-		// Record request size
-		if r.ContentLength > 0 {
-			httpRequestSize.WithLabelValues(r.Method, r.URL.Path).Observe(float64(r.ContentLength))
-		}
-
 		// Process request
 		next.ServeHTTP(ww, r)
 
-		// Calculate duration
 		duration := time.Since(start).Seconds()
-
-		// Get status code as string
 		status := strconv.Itoa(ww.Status())
+		path := routePattern(r)
 
-		// Record metrics
-		httpRequestsTotal.WithLabelValues(r.Method, r.URL.Path, status).Inc()
-		httpRequestDuration.WithLabelValues(r.Method, r.URL.Path, status).Observe(duration)
-		httpResponseSize.WithLabelValues(r.Method, r.URL.Path).Observe(float64(ww.BytesWritten()))
+		httpRequestsTotal.WithLabelValues(r.Method, path, status).Inc()
+		httpRequestDuration.WithLabelValues(r.Method, path, status).Observe(duration)
+		httpResponseSize.WithLabelValues(r.Method, path).Observe(float64(ww.BytesWritten()))
+		if r.ContentLength > 0 {
+			httpRequestSize.WithLabelValues(r.Method, path).Observe(float64(r.ContentLength))
+		}
 	})
+}
+
+// routePattern returns the matched chi route (e.g. /api/stores/{storeID}) rather
+// than the raw URL, keeping label cardinality bounded. It is only complete after
+// the next handler has run.
+func routePattern(r *http.Request) string {
+	rctx := chi.RouteContext(r.Context())
+	if rctx == nil {
+		return unmatchedRoute
+	}
+	if pattern := rctx.RoutePattern(); pattern != "" {
+		return pattern
+	}
+	return unmatchedRoute
 }

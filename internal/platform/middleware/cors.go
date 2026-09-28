@@ -11,6 +11,8 @@ type CORSConfig struct {
 	AllowedOrigins []string
 	AllowedMethods []string
 	AllowedHeaders []string
+	// ExposedHeaders lists response headers browser code may read.
+	ExposedHeaders []string
 	MaxAge         int
 }
 
@@ -42,6 +44,9 @@ func CORS(config *CORSConfig) func(http.Handler) http.Handler {
 			w.Header().Set("Access-Control-Allow-Methods", strings.Join(config.AllowedMethods, ", "))
 			w.Header().Set("Access-Control-Allow-Headers", strings.Join(config.AllowedHeaders, ", "))
 			w.Header().Set("Access-Control-Max-Age", fmt.Sprintf("%d", config.MaxAge))
+			if len(config.ExposedHeaders) > 0 {
+				w.Header().Set("Access-Control-Expose-Headers", strings.Join(config.ExposedHeaders, ", "))
+			}
 
 			// Handle preflight requests
 			if r.Method == "OPTIONS" {

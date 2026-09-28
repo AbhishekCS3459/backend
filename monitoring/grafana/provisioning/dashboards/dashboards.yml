@@ -1,0 +1,10 @@
+apiVersion: 1
+
+providers:
+  - name: find-me
+    folder: Find Me
+    type: file
+    disableDeletion: true
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards

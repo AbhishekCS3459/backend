@@ -1,4 +1,4 @@
-.PHONY: help swagger swagger-serve build run run-prod run-dev dev stop lint lint-fix fmt vet test test-coverage test-utils bench-utils test-setup check migrate-up migrate-down migrate-create migrate-status docker-up docker-down docker-build clean catalog-indexes catalog-cleanup-preview catalog-prepare
+.PHONY: help swagger swagger-serve build run run-prod run-dev dev stop lint lint-fix fmt vet test test-coverage test-utils bench-utils test-setup check migrate-up migrate-down migrate-create migrate-status docker-up docker-down docker-build monitoring-up monitoring-down clean catalog-indexes catalog-cleanup-preview catalog-prepare
 
 # Local development database 
 DEV_DATABASE_URL=postgresql://postgres:postgres@localhost:5434/find_me?sslmode=disable
@@ -33,6 +33,8 @@ help:
 	@echo "  make docker-up        - Start Docker services"
 	@echo "  make docker-down      - Stop Docker services"
 	@echo "  make docker-build     - Build Docker image"
+	@echo "  make monitoring-up    - Start Prometheus (:9090) and Grafana (:3001) in Docker"
+	@echo "  make monitoring-down  - Stop Prometheus and Grafana"
 	@echo "  make redis-up         - Start Redis container for queue testing"
 	@echo "  make redis-down       - Stop Redis container"
 	@echo "  make redis-test       - Start Redis and run Redis queue tests"
@@ -451,6 +453,21 @@ docker-build:
 	@echo "Building Docker image..."
 	@docker compose build
 	@echo "✅ Docker image built"
+
+# Monitoring (Prometheus + Grafana) - scrapes the API running on the host
+monitoring-up:
+	@if ! docker info > /dev/null 2>&1; then \
+		echo "❌ Error: Docker is not running. Please start Docker Desktop."; \
+		exit 1; \
+	fi
+	@docker compose up -d prometheus grafana
+	@echo "✅ Monitoring started"
+	@echo "Prometheus: http://localhost:9090  (targets: http://localhost:9090/targets)"
+	@echo "Grafana:    http://localhost:3001  (admin / admin)"
+
+monitoring-down:
+	@docker compose stop prometheus grafana
+	@echo "✅ Monitoring stopped"
 
 # Redis commands for queue testing
 redis-up: ## Start Redis container for queue testing

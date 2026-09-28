@@ -9,6 +9,7 @@ import (
 	"github.com/AbhishekCS3459/find-me-backend/internal/identity"
 	"github.com/AbhishekCS3459/find-me-backend/internal/identity/progress"
 	"github.com/AbhishekCS3459/find-me-backend/internal/identity/retailer"
+	"github.com/AbhishekCS3459/find-me-backend/internal/inventory"
 	"github.com/AbhishekCS3459/find-me-backend/internal/listproducts"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/database"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/health"
@@ -52,7 +53,8 @@ func SetupRoutes(db *database.DB, mongoClient *mongodb.Client, cfg *Config) *chi
 			"https://www.todayz.in",
 		},
 		AllowedMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"},
-		AllowedHeaders: []string{"Content-Type", "Authorization", "X-API-Token"},
+		AllowedHeaders: []string{"Content-Type", "Authorization", "X-API-Token", inventory.IdempotencyKeyHeader},
+		ExposedHeaders: []string{inventory.IdempotentReplayedHeader},
 		MaxAge:         3600,
 	}
 	router.Use(middleware.CORS(corsConfig))
@@ -81,7 +83,9 @@ func SetupRoutes(db *database.DB, mongoClient *mongodb.Client, cfg *Config) *chi
 	categoryHandler := catalog.NewHandler(catalog.NewService(catalog.NewRepository(db.Gorm)))
 	storeAccess := storeaccess.NewResolver(db.Gorm)
 	storeHandler := stores.NewHandler(stores.NewService(stores.NewRepository(db.Gorm), retailerRepo, storeAccess))
-	listProductsService := listproducts.NewService(listproducts.NewRepository(db.Gorm), storeAccess)
+	inventoryLedger := inventory.NewLedger()
+	inventoryHandler := inventory.NewHandler(inventory.NewService(db.Gorm, storeAccess, inventoryLedger))
+	listProductsService := listproducts.NewService(listproducts.NewRepository(db.Gorm, inventoryLedger), storeAccess)
 	listProductsHandler := listproducts.NewHandler(listProductsService)
 	teamHandler := team.NewHandler(team.NewService(team.NewRepository(db.Gorm), storeAccess))
 	truecallerHandler := truecaller.NewHandler(truecaller.NewService(truecaller.NewStore(cfg.RedisURL), userService))
@@ -131,6 +135,9 @@ func SetupRoutes(db *database.DB, mongoClient *mongodb.Client, cfg *Config) *chi
 		r.Mount("/catalog", productCatalogHandler.Routes())
 		r.Route("/stores/{storeID}/products", func(r chi.Router) {
 			r.Mount("/", listProductsHandler.Routes())
+		})
+		r.Route("/stores/{storeID}/inventory", func(r chi.Router) {
+			r.Mount("/", inventoryHandler.Routes())
 		})
 		r.Mount("/stores", storeHandler.Routes())
 		r.Mount("/team", teamHandler.Routes())

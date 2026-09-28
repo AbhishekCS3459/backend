@@ -106,34 +106,21 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		httputil.WriteError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	row, err := h.svc.Update(r.Context(), userID, storeID, variantID, &req)
-	if err != nil {
-		h.writeErr(w, err, userID.String(), "failed to update inventory")
-		return
-	}
-	httputil.WriteJSON(w, http.StatusOK, row)
-}
-
-func (h *Handler) BulkUpdate(w http.ResponseWriter, r *http.Request) {
-	userID, storeID, ok := h.ids(w, r)
-	if !ok {
-		return
-	}
-	var req BulkUpdateRequest
-	if err := httputil.DecodeJSON(r, &req); err != nil {
-		httputil.WriteError(w, http.StatusBadRequest, "invalid request body")
+	if req.QuantityAvailable != nil {
+		httputil.WriteError(w, http.StatusBadRequest,
+			"stock can't be edited here; use the inventory receive or adjust endpoints so the change is recorded")
 		return
 	}
 	if err := httputil.ValidateStruct(&req); err != nil {
 		httputil.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	updated, err := h.svc.BulkUpdate(r.Context(), userID, storeID, &req)
+	row, err := h.svc.Update(r.Context(), userID, storeID, variantID, &req)
 	if err != nil {
 		h.writeErr(w, err, userID.String(), "failed to update inventory")
 		return
 	}
-	httputil.WriteJSON(w, http.StatusOK, map[string]int{"updated": updated})
+	httputil.WriteJSON(w, http.StatusOK, row)
 }
 
 func (h *Handler) Remove(w http.ResponseWriter, r *http.Request) {
