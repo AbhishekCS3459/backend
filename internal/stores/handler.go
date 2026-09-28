@@ -63,25 +63,100 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
-	userID, ok := middleware.GetUserID(r.Context())
+	userID, storeID, ok := storeRequest(w, r)
 	if !ok {
-		httputil.WriteError(w, http.StatusUnauthorized, "authentication required")
-		return
-	}
-	storeID, err := uuid.Parse(chi.URLParam(r, "storeID"))
-	if err != nil {
-		httputil.WriteError(w, http.StatusBadRequest, "invalid store id")
 		return
 	}
 	row, err := h.svc.Get(r.Context(), userID, storeID)
 	if err != nil {
-		if errors.Is(err, ErrNotFound) {
-			httputil.WriteError(w, http.StatusNotFound, "store not found")
-			return
-		}
-		log.Error().Err(err).Str("user_id", userID.String()).Msg("failed to get store")
-		httputil.WriteError(w, http.StatusInternalServerError, "failed to load store")
+		writeServiceError(w, err, userID, "failed to load store")
 		return
 	}
 	httputil.WriteJSON(w, http.StatusOK, row)
+}
+
+func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
+	userID, storeID, ok := storeRequest(w, r)
+	if !ok {
+		return
+	}
+	var req UpdateRequest
+	if err := httputil.DecodeJSON(r, &req); err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := httputil.ValidateStruct(&req); err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	row, err := h.svc.Update(r.Context(), userID, storeID, &req)
+	if err != nil {
+		writeServiceError(w, err, userID, "failed to update store")
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, row)
+}
+
+func (h *Handler) Onboarding(w http.ResponseWriter, r *http.Request) {
+	userID, storeID, ok := storeRequest(w, r)
+	if !ok {
+		return
+	}
+	view, err := h.svc.Onboarding(r.Context(), userID, storeID)
+	if err != nil {
+		writeServiceError(w, err, userID, "failed to load store setup")
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, view)
+}
+
+func (h *Handler) SaveOnboarding(w http.ResponseWriter, r *http.Request) {
+	userID, storeID, ok := storeRequest(w, r)
+	if !ok {
+		return
+	}
+	var req SaveOnboardingRequest
+	if err := httputil.DecodeJSON(r, &req); err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	view, err := h.svc.SaveOnboarding(r.Context(), userID, storeID, req.Data)
+	if err != nil {
+		writeServiceError(w, err, userID, "failed to save store setup")
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, view)
+}
+
+func storeRequest(w http.ResponseWriter, r *http.Request) (userID, storeID uuid.UUID, ok bool) {
+	userID, ok = middleware.GetUserID(r.Context())
+	if !ok {
+		httputil.WriteError(w, http.StatusUnauthorized, "authentication required")
+		return uuid.Nil, uuid.Nil, false
+	}
+	storeID, err := uuid.Parse(chi.URLParam(r, "storeID"))
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, "invalid store id")
+		return uuid.Nil, uuid.Nil, false
+	}
+	return userID, storeID, true
+}
+
+func writeServiceError(w http.ResponseWriter, err error, userID uuid.UUID, fallback string) {
+	var incomplete *IncompleteError
+	switch {
+	case errors.Is(err, ErrNotFound):
+		httputil.WriteError(w, http.StatusNotFound, "store not found")
+	case errors.Is(err, ErrNotOwner):
+		httputil.WriteError(w, http.StatusForbidden, err.Error())
+	case errors.Is(err, ErrOnboardingComplete):
+		httputil.WriteError(w, http.StatusConflict, err.Error())
+	case errors.Is(err, ErrNameTooLong):
+		httputil.WriteError(w, http.StatusBadRequest, err.Error())
+	case errors.As(err, &incomplete):
+		httputil.WriteError(w, http.StatusUnprocessableEntity, err.Error())
+	default:
+		log.Error().Err(err).Str("user_id", userID.String()).Msg(fallback)
+		httputil.WriteError(w, http.StatusInternalServerError, fallback)
+	}
 }

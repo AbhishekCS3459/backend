@@ -7,5 +7,8 @@ func (h *Handler) Routes() chi.Router {
 	r.Get("/", h.List)
 	r.Post("/", h.Create)
 	r.Get("/{storeID}", h.Get)
+	r.Patch("/{storeID}", h.Update)
+	r.Get("/{storeID}/onboarding", h.Onboarding)
+	r.Put("/{storeID}/onboarding", h.SaveOnboarding)
 	return r
 }

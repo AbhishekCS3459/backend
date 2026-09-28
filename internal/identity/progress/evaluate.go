@@ -17,6 +17,24 @@ var stepRules = []stepRule{
 	{key: "verify_submit", done: func(Draft) bool { return false }},
 }
 
+var stepLabels = map[string]string{
+	"retailer_profile":  "Retailer profile",
+	"business_details":  "Business details",
+	"seller_details":    "Seller details",
+	"brand_details":     "Brand details",
+	"bank_details":      "Bank details",
+	"shipping_location": "Shipping location",
+	"verify_submit":     "Verify & submit",
+}
+
+// StepLabel is the name the retailer sees for a step key.
+func StepLabel(key string) string {
+	if label, ok := stepLabels[key]; ok {
+		return label
+	}
+	return key
+}
+
 func Evaluate(draft Draft) (steps []Step, overall, current string) {
 	steps = make([]Step, len(stepRules))
 	previousDone := true

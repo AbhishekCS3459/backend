@@ -9,13 +9,21 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var ErrNotFound = errors.New("store not found")
 
 type Repository interface {
 	ListByIDs(ctx context.Context, ids []uuid.UUID) ([]Summary, error)
+	FindByID(ctx context.Context, id uuid.UUID) (*Store, error)
 	Create(ctx context.Context, store *Store, images []string) (*Summary, error)
+	// UpdateLocked loads the store with FOR UPDATE, lets apply change it, and
+	// saves the listed columns in the same transaction. An error from apply
+	// aborts without writing.
+	UpdateLocked(ctx context.Context, id uuid.UUID, apply func(*Store) error, columns ...string) (*Store, error)
+	// Update changes the given details; a non-nil images slice replaces all photos.
+	Update(ctx context.Context, id uuid.UUID, name, description *string, images *[]string) (*Summary, error)
 	DefaultCategoryID(ctx context.Context) (uuid.UUID, error)
 }
 
@@ -57,29 +65,114 @@ func (r *repository) Create(ctx context.Context, store *Store, images []string) 
 	if store.KYBStatus == "" {
 		store.KYBStatus = "PENDING"
 	}
+	if store.OnboardingStatus == "" {
+		store.OnboardingStatus = OnboardingDraft
+	}
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(store).Error; err != nil {
 			return err
 		}
-		for i, url := range images {
-			media := Media{
-				ID:        uuid.New(),
-				StoreID:   store.ID,
-				MediaURL:  url,
-				Type:      "photo",
-				SortOrder: i,
-				IsCover:   i == 0,
-			}
-			if err := tx.Create(&media).Error; err != nil {
-				return err
-			}
-		}
-		return nil
+		return insertMedia(tx, store.ID, images)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create store: %w", err)
 	}
 	return r.attachSummary(ctx, *store)
+}
+
+func insertMedia(tx *gorm.DB, storeID uuid.UUID, images []string) error {
+	for i, url := range images {
+		media := Media{
+			ID:        uuid.New(),
+			StoreID:   storeID,
+			MediaURL:  url,
+			Type:      "photo",
+			SortOrder: i,
+			IsCover:   i == 0,
+		}
+		if err := tx.Create(&media).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *repository) FindByID(ctx context.Context, id uuid.UUID) (*Store, error) {
+	var store Store
+	err := r.db.WithContext(ctx).Where("id = ?", id).First(&store).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find store: %w", err)
+	}
+	return &store, nil
+}
+
+func (r *repository) UpdateLocked(
+	ctx context.Context, id uuid.UUID, apply func(*Store) error, columns ...string,
+) (*Store, error) {
+	var store Store
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", id).First(&store).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if err := apply(&store); err != nil {
+			return err
+		}
+		store.UpdatedAt = time.Now().UTC()
+		return tx.Model(&store).Select(append(columns, "updated_at")).Updates(&store).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &store, nil
+}
+
+func (r *repository) Update(
+	ctx context.Context, id uuid.UUID, name, description *string, images *[]string,
+) (*Summary, error) {
+	var store Store
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", id).First(&store).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		columns := []string{"updated_at"}
+		if name != nil {
+			store.Name = *name
+			columns = append(columns, "name")
+		}
+		if description != nil {
+			store.Description = *description
+			columns = append(columns, "description")
+		}
+		store.UpdatedAt = time.Now().UTC()
+		if err := tx.Model(&store).Select(columns).Updates(&store).Error; err != nil {
+			return err
+		}
+		if images == nil {
+			return nil
+		}
+		if err := tx.Where("store_id = ?", id).Delete(&Media{}).Error; err != nil {
+			return err
+		}
+		return insertMedia(tx, id, *images)
+	})
+	if errors.Is(err, ErrNotFound) {
+		return nil, err
+	}
+	if err != nil {
+		return nil, fmt.Errorf("update store: %w", err)
+	}
+	return r.attachSummary(ctx, store)
 }
 
 func (r *repository) DefaultCategoryID(ctx context.Context) (uuid.UUID, error) {
@@ -128,5 +221,6 @@ func (r *repository) attachSummary(ctx context.Context, store Store) (*Summary, 
 		ProductCount:   productCount,
 		TotalInventory: totalInventory,
 		LowStockCount:  lowStock,
+		Onboarding:     onboardingSummary(store),
 	}, nil
 }
