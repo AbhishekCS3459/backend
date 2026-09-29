@@ -3,6 +3,7 @@ package stores
 import (
 	"time"
 
+	"github.com/AbhishekCS3459/find-me-backend/internal/availability"
 	"github.com/AbhishekCS3459/find-me-backend/internal/identity/progress"
 	"github.com/AbhishekCS3459/find-me-backend/internal/storeaccess"
 	"github.com/google/uuid"
@@ -34,6 +35,31 @@ type Store struct {
 }
 
 func (Store) TableName() string { return "store" }
+
+func (s *Store) searchable() bool {
+	return availability.StoreSearchable(s.Status, s.IsOpen, s.OnboardingStatus, s.DeletedAt.Valid)
+}
+
+// Location is where the store is. Customer search finds nearby stores by its
+// point (store_location.geog, which PostgreSQL computes from lat and lng).
+type Location struct {
+	StoreID             uuid.UUID `json:"store_id" gorm:"type:uuid;primaryKey"`
+	AddressLine         string    `json:"address_line"`
+	City                string    `json:"city"`
+	Pincode             string    `json:"pincode"`
+	Lat                 float64   `json:"lat"`
+	Lng                 float64   `json:"lng"`
+	ServiceAreaRadiusKm int       `json:"service_area_radius_km" gorm:"column:service_area_radius_km"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
+}
+
+func (Location) TableName() string { return "store_location" }
+
+func (l *Location) draft(label string) progress.Shipping {
+	lat, lng := l.Lat, l.Lng
+	return progress.Shipping{Label: label, Address: l.AddressLine, City: l.City, Pin: l.Pincode, Lat: &lat, Lng: &lng}
+}
 
 type Media struct {
 	ID        uuid.UUID `json:"id" gorm:"type:uuid;primaryKey"`
@@ -113,6 +139,18 @@ type UpdateRequest struct {
 
 type SaveOnboardingRequest struct {
 	Data progress.Draft `json:"data"`
+}
+
+// SaveLocationRequest sets the store's address and map pin. Lat and Lng are
+// pointers so a missing value isn't mistaken for 0.
+type SaveLocationRequest struct {
+	AddressLine string   `json:"address_line" validate:"required,max=255"`
+	City        string   `json:"city" validate:"required,max=255"`
+	Pincode     string   `json:"pincode" validate:"required,len=6,number"`
+	Lat         *float64 `json:"lat" validate:"required,min=-90,max=90"`
+	Lng         *float64 `json:"lng" validate:"required,min=-180,max=180"`
+	// ServiceAreaRadiusKm keeps its current value (or the default) when omitted.
+	ServiceAreaRadiusKm int `json:"service_area_radius_km" validate:"omitempty,min=1,max=50"`
 }
 
 // SaveBankRequest uses the same field names as the onboarding draft's bank section.

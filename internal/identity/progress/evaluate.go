@@ -120,7 +120,25 @@ func brandMissing(draft Draft) []string {
 }
 
 func shippingMissing(draft Draft) []string {
-	return need(nil, filled(draft.Shipping.Address), "Enter the shipping address.")
+	shipping := draft.Shipping
+	var missing []string
+	missing = need(missing, filled(shipping.Address), "Enter the shipping address.")
+	missing = need(missing, filled(shipping.City), "Enter the city.")
+	missing = need(missing, validPin(shipping.Pin), "Enter the 6-digit PIN code.")
+	return need(missing, shipping.Lat != nil && shipping.Lng != nil, "Use your current location to pin the store.")
+}
+
+func validPin(pin string) bool {
+	pin = strings.TrimSpace(pin)
+	if len(pin) != 6 {
+		return false
+	}
+	for _, r := range pin {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func need(missing []string, ok bool, reason string) []string {

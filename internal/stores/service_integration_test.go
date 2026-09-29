@@ -9,6 +9,7 @@ import (
 	"github.com/AbhishekCS3459/find-me-backend/internal/identity/progress"
 	"github.com/AbhishekCS3459/find-me-backend/internal/identity/retailer"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/database"
+	"github.com/AbhishekCS3459/find-me-backend/internal/platform/httputil"
 	"github.com/AbhishekCS3459/find-me-backend/internal/storeaccess"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -58,6 +59,8 @@ func newTestService(t *testing.T) (svc Service, userID uuid.UUID) {
 	t.Cleanup(func() {
 		_ = db.Exec(`DELETE FROM store_media WHERE store_id IN
 			(SELECT id FROM store WHERE retailer_id = ?)`, retailerID).Error
+		_ = db.Exec(`DELETE FROM store_location WHERE store_id IN
+			(SELECT id FROM store WHERE retailer_id = ?)`, retailerID).Error
 		_ = db.Exec(`DELETE FROM store WHERE retailer_id = ?`, retailerID).Error
 		_ = db.Exec(`DELETE FROM bank_details WHERE retailer_id = ?`, retailerID).Error
 		_ = db.Exec(`DELETE FROM retailer_kyc WHERE retailer_id = ?`, retailerID).Error
@@ -68,6 +71,7 @@ func newTestService(t *testing.T) (svc Service, userID uuid.UUID) {
 }
 
 func completeDraft(name string) progress.Draft {
+	lat, lng := 12.9716, 77.5946
 	return progress.Draft{
 		Name:        name,
 		Categories:  progress.StringList{"Grocery"},
@@ -77,8 +81,17 @@ func completeDraft(name string) progress.Draft {
 		GSTVerified: true,
 		Brand:       progress.Brand{Name: "Fresh Co", Manufacturer: "Fresh Co", Logo: "https://example.com/logo.png"},
 		Bank:        progress.Bank{Method: "bank", Holder: "Asha", Number: "12345678", IFSC: "HDFC0001234"},
-		Shipping:    progress.Shipping{Address: "12 Market Road"},
+		Shipping:    progress.Shipping{Address: "12 Market Road", City: "Bengaluru", Pin: "560001", Lat: &lat, Lng: &lng},
 	}
+}
+
+func saveLocation(t *testing.T, svc Service, userID, storeID uuid.UUID) {
+	t.Helper()
+	lat, lng := 12.9716, 77.5946
+	_, err := svc.SaveLocation(context.Background(), userID, storeID, &SaveLocationRequest{
+		AddressLine: "12 Market Road", City: "Bengaluru", Pincode: "560001", Lat: &lat, Lng: &lng,
+	})
+	require.NoError(t, err)
 }
 
 func TestNewStoreOnboardingStartsFromRetailerProfile(t *testing.T) {
@@ -138,6 +151,14 @@ func TestEachStoreHasItsOwnOnboarding(t *testing.T) {
 	assert.Equal(t, "shipping_location", incomplete.Step)
 
 	ready := completeDraft("First Store Renamed")
+	ready.Submitted = true
+	_, err = svc.SaveOnboarding(ctx, userID, first.ID, ready)
+	require.ErrorAs(t, err, &incomplete)
+	assert.Equal(t, "shipping_location", incomplete.Step, "a pin sent with the draft doesn't count until saved")
+	assert.Contains(t, err.Error(), "Use your current location to pin the store.")
+
+	saveLocation(t, svc, userID, first.ID)
+	ready.Submitted = false
 	view, err = svc.SaveOnboarding(ctx, userID, first.ID, ready)
 	require.NoError(t, err)
 	assert.Equal(t, progress.StatusDraft, view.Status, "saving without submitting keeps the store in draft")
@@ -309,4 +330,77 @@ func TestUpdateStoreDetailsAndPhotos(t *testing.T) {
 	assert.ErrorIs(t, err, ErrNotFound, "other users can't see the store")
 	_, err = svc.SaveOnboarding(ctx, stranger, store.ID, completeDraft("x"))
 	assert.ErrorIs(t, err, ErrNotFound)
+}
+
+func TestStoreLocation(t *testing.T) {
+	svc, userID := newTestService(t)
+	ctx := context.Background()
+	typed := completeDraft("Located Store")
+	typed.Shipping.Label = "Main shop"
+	store, err := svc.Create(ctx, userID, &CreateRequest{Name: "Located Store", Onboarding: &typed})
+	require.NoError(t, err)
+
+	_, err = svc.Location(ctx, userID, store.ID)
+	assert.ErrorIs(t, err, ErrLocationNotSet)
+	view, err := svc.Onboarding(ctx, userID, store.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "12 Market Road", view.Data.Shipping.Address, "the typed address is kept for the form")
+	assert.Nil(t, view.Data.Shipping.Lat, "a pin sent before the store existed is dropped")
+	assert.Equal(t, progress.StatusDraft, view.Steps[5].Status)
+
+	lat, lng := 12.9716, 77.5946
+	req := &SaveLocationRequest{
+		AddressLine: " 12 Market Road ", City: "Bengaluru", Pincode: "560001", Lat: &lat, Lng: &lng,
+	}
+	saved, err := svc.SaveLocation(ctx, userID, store.ID, req)
+	require.NoError(t, err)
+	assert.Equal(t, "12 Market Road", saved.AddressLine)
+	assert.Equal(t, defaultServiceRadiusKm, saved.ServiceAreaRadiusKm)
+
+	view, err = svc.Onboarding(ctx, userID, store.ID)
+	require.NoError(t, err)
+	assert.Equal(t, progress.StatusCompleted, view.Steps[5].Status, "a saved location completes the shipping step")
+	assert.Equal(t, "Main shop", view.Data.Shipping.Label)
+	require.NotNil(t, view.Data.Shipping.Lat)
+	assert.InDelta(t, lat, *view.Data.Shipping.Lat, 1e-9)
+
+	req.ServiceAreaRadiusKm = 8
+	_, err = svc.SaveLocation(ctx, userID, store.ID, req)
+	require.NoError(t, err)
+	moved := 12.98
+	req.Lat, req.ServiceAreaRadiusKm = &moved, 0
+	_, err = svc.SaveLocation(ctx, userID, store.ID, req)
+	require.NoError(t, err)
+
+	got, err := svc.Location(ctx, userID, store.ID)
+	require.NoError(t, err)
+	assert.InDelta(t, 12.98, got.Lat, 1e-9)
+	assert.Equal(t, 8, got.ServiceAreaRadiusKm, "omitting the radius keeps the current one")
+
+	zero := 0.0
+	_, err = svc.SaveLocation(ctx, userID, store.ID, &SaveLocationRequest{
+		AddressLine: "12 Market Road", City: "Bengaluru", Pincode: "560001", Lat: &zero, Lng: &zero,
+	})
+	assert.ErrorIs(t, err, ErrLocationIncomplete, "an untouched map pin is rejected")
+
+	_, err = svc.SaveLocation(ctx, uuid.New(), store.ID, req)
+	assert.ErrorIs(t, err, ErrNotFound, "other users can't see the store")
+}
+
+func TestSaveLocationRequestValidation(t *testing.T) {
+	lat, lng, far := 12.97, 77.59, 91.0
+	valid := SaveLocationRequest{AddressLine: "12 Market Road", City: "Bengaluru", Pincode: "560001", Lat: &lat, Lng: &lng}
+	require.NoError(t, httputil.ValidateStruct(&valid))
+
+	for name, mutate := range map[string]func(*SaveLocationRequest){
+		"missing lat":       func(r *SaveLocationRequest) { r.Lat = nil },
+		"lat out of range":  func(r *SaveLocationRequest) { r.Lat = &far },
+		"short pincode":     func(r *SaveLocationRequest) { r.Pincode = "56001" },
+		"non-digit pincode": func(r *SaveLocationRequest) { r.Pincode = "56000A" },
+		"radius too large":  func(r *SaveLocationRequest) { r.ServiceAreaRadiusKm = 51 },
+	} {
+		req := valid
+		mutate(&req)
+		assert.Errorf(t, httputil.ValidateStruct(&req), name)
+	}
 }

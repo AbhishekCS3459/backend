@@ -7,12 +7,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	chiMiddleware "github.com/go-chi/chi/v5/middleware"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -22,29 +24,39 @@ import (
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/middleware"
 )
 
-// Note: Tests require a test database
-// Set TEST_DATABASE_URL environment variable or use default:
-// postgresql://postgres:postgres@localhost:5434/find_me_test?sslmode=disable
-// Make sure to run migrations before running tests: make test-setup
+// These tests need a dedicated test database, e.g.
+// TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5434/find_me_test?sslmode=disable
+// Run migrations on it first: make test-setup
 
 var testRouter *chi.Mux
 var testDB *database.DB
+
+// testDatabaseURL returns TEST_DATABASE_URL and refuses anything else. Teardown
+// runs TRUNCATE users CASCADE, which empties every account, store and stock row,
+// so these tests never fall back to DATABASE_URL.
+func testDatabaseURL(t *testing.T) string {
+	t.Helper()
+	dbURL := os.Getenv("TEST_DATABASE_URL")
+	if dbURL == "" {
+		if os.Getenv("CI") != "" {
+			t.Fatal("TEST_DATABASE_URL must be set in CI")
+		}
+		t.Skip("TEST_DATABASE_URL not set; these tests empty the users table, so they won't use DATABASE_URL")
+	}
+	cfg, err := pgconn.ParseConfig(dbURL)
+	require.NoError(t, err, "parse TEST_DATABASE_URL")
+	if !strings.Contains(strings.ToLower(cfg.Database), "test") {
+		t.Fatalf("refusing to run: TEST_DATABASE_URL database %q doesn't contain \"test\" in its name", cfg.Database)
+	}
+	return dbURL
+}
 
 // setupTestRouter creates a test router with all routes configured
 func setupTestRouter(t *testing.T) *chi.Mux {
 	if testRouter != nil {
 		return testRouter
 	}
-
-	// Get test database URL from environment or use default
-	dbURL := os.Getenv("TEST_DATABASE_URL")
-	if dbURL == "" {
-		dbURL = os.Getenv("DATABASE_URL")
-	}
-	if dbURL == "" {
-		// Default to Docker database port (5434) for test database
-		dbURL = "postgresql://postgres:postgres@localhost:5434/find_me_test?sslmode=disable"
-	}
+	dbURL := testDatabaseURL(t)
 
 	// Connect to test database
 	ctx := context.Background()

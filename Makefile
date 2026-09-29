@@ -1,4 +1,4 @@
-.PHONY: help swagger swagger-serve build run run-prod run-dev dev stop lint lint-fix fmt vet test test-coverage test-utils bench-utils test-setup check migrate-up migrate-down migrate-create migrate-status docker-up docker-down docker-build monitoring-up monitoring-down clean catalog-indexes catalog-cleanup-preview catalog-prepare
+.PHONY: help swagger swagger-serve build run run-prod run-dev dev stop lint lint-fix fmt vet test test-coverage test-utils bench-utils test-setup check migrate-up migrate-down migrate-create migrate-status docker-up docker-down docker-build monitoring-up monitoring-down clean catalog-indexes catalog-cleanup-preview catalog-prepare availability-check availability-backfill
 
 # Local development database 
 DEV_DATABASE_URL=postgresql://postgres:postgres@localhost:5434/find_me?sslmode=disable
@@ -42,6 +42,8 @@ help:
 	@echo "  make catalog-cleanup-preview - Show what catalog-prepare would change (MongoDB catalogue)"
 	@echo "  make catalog-prepare  - After a catalogue upload: remove platform/url/city/locality/address/scrapedAt, build search, ensure indexes"
 	@echo "  make catalog-indexes  - Create the MongoDB catalogue indexes and the product_search Atlas Search index"
+	@echo "  make availability-check    - Report customer search rows that don't match inventory (exits 1 on drift)"
+	@echo "  make availability-backfill - Build or repair the customer search table from inventory"
 
 # Generate Swagger docs from code annotations
 swagger:
@@ -89,6 +91,15 @@ catalog-cleanup-preview:
 catalog-prepare:
 	@go run ./cmd/catalog-cleanup -apply
 	@go run ./cmd/catalog-indexes
+
+# Report rows of the customer search table that don't match inventory (exits 1 on drift)
+availability-check:
+	@go run ./cmd/availability-sync
+
+# Build or repair the customer search table from inventory. Safe to re-run
+# while the API is serving; only rows that differ are written.
+availability-backfill:
+	@go run ./cmd/availability-sync -apply
 
 # Run the application locally against the production database
 run-prod:

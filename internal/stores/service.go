@@ -23,7 +23,12 @@ var (
 	ErrOnboardingComplete = errors.New("this store's setup is already complete")
 	ErrNameTooLong        = errors.New("store name must be at most 255 characters")
 	ErrBankIncomplete     = errors.New("enter the account holder, account number and IFSC, or upload a payment QR")
+	ErrLocationNotSet     = errors.New("this store's location isn't set yet")
+	ErrLocationIncomplete = errors.New("enter the address and city, and pin the store's location")
 )
+
+// defaultServiceRadiusKm applies until the retailer chooses a service area.
+const defaultServiceRadiusKm = 5
 
 type Service interface {
 	// ListMine returns stores the user owns or is active staff in.
@@ -44,6 +49,10 @@ type Service interface {
 	// Delete removes the store for its owner and staff. Orders, stock history
 	// and payouts are kept for records.
 	Delete(ctx context.Context, userID, storeID uuid.UUID) error
+	// Location returns ErrLocationNotSet until the store saves one.
+	Location(ctx context.Context, userID, storeID uuid.UUID) (*Location, error)
+	// SaveLocation sets the store's address and map pin; search uses the pin.
+	SaveLocation(ctx context.Context, userID, storeID uuid.UUID, req *SaveLocationRequest) (*Location, error)
 }
 
 type service struct {
@@ -101,6 +110,7 @@ func (s *service) Create(ctx context.Context, userID uuid.UUID, req *CreateReque
 	draft.Name = name
 	draft.Submitted = false
 	draft.Bank = progress.Bank{}
+	applyLocation(&draft, nil)
 	applyRetailer(&draft, profile)
 	payload, err := json.Marshal(draft)
 	if err != nil {
@@ -202,11 +212,9 @@ func (s *service) Onboarding(ctx context.Context, userID, storeID uuid.UUID) (*p
 		}
 		applyRetailer(&draft, profile)
 	}
-	bank, err := s.repo.FindBank(ctx, storeID)
-	if err != nil {
+	if err := s.applySaved(ctx, storeID, &draft); err != nil {
 		return nil, err
 	}
-	applyBank(&draft, bank)
 	return onboardingView(*store, draft), nil
 }
 
@@ -227,11 +235,9 @@ func (s *service) SaveOnboarding(
 		return nil, err
 	}
 	applyRetailer(&draft, profile)
-	bank, err := s.repo.FindBank(ctx, storeID)
-	if err != nil {
+	if err := s.applySaved(ctx, storeID, &draft); err != nil {
 		return nil, err
 	}
-	applyBank(&draft, bank)
 
 	submit := draft.Submitted
 	draft.Submitted = false
@@ -243,6 +249,7 @@ func (s *service) SaveOnboarding(
 	}
 	persisted := draft
 	persisted.Bank = progress.Bank{}
+	persisted.Shipping.Lat, persisted.Shipping.Lng = nil, nil
 	payload, err := json.Marshal(persisted)
 	if err != nil {
 		return nil, err
@@ -299,6 +306,77 @@ func (s *service) Delete(ctx context.Context, userID, storeID uuid.UUID) error {
 		return err
 	}
 	return s.repo.Delete(ctx, storeID)
+}
+
+func (s *service) Location(ctx context.Context, userID, storeID uuid.UUID) (*Location, error) {
+	if err := s.require(ctx, userID, storeID, storeaccess.StoreView); err != nil {
+		return nil, err
+	}
+	loc, err := s.repo.FindLocation(ctx, storeID)
+	if err != nil {
+		return nil, err
+	}
+	if loc == nil {
+		return nil, ErrLocationNotSet
+	}
+	return loc, nil
+}
+
+func (s *service) SaveLocation(
+	ctx context.Context, userID, storeID uuid.UUID, req *SaveLocationRequest,
+) (*Location, error) {
+	if err := s.require(ctx, userID, storeID, storeaccess.StoreManage); err != nil {
+		return nil, err
+	}
+	loc := &Location{
+		StoreID:             storeID,
+		AddressLine:         strings.TrimSpace(req.AddressLine),
+		City:                strings.TrimSpace(req.City),
+		Pincode:             strings.TrimSpace(req.Pincode),
+		Lat:                 *req.Lat,
+		Lng:                 *req.Lng,
+		ServiceAreaRadiusKm: req.ServiceAreaRadiusKm,
+	}
+	// 0,0 is what an untouched map picker sends; no store is there.
+	if loc.AddressLine == "" || loc.City == "" || (loc.Lat == 0 && loc.Lng == 0) {
+		return nil, ErrLocationIncomplete
+	}
+	if loc.ServiceAreaRadiusKm == 0 {
+		loc.ServiceAreaRadiusKm = defaultServiceRadiusKm
+		current, err := s.repo.FindLocation(ctx, storeID)
+		if err != nil {
+			return nil, err
+		}
+		if current != nil {
+			loc.ServiceAreaRadiusKm = current.ServiceAreaRadiusKm
+		}
+	}
+	return s.repo.SaveLocation(ctx, loc)
+}
+
+// applySaved shows what the store keeps outside its draft: the payout account
+// and the location. Setup is judged on these, not on what the client sent.
+func (s *service) applySaved(ctx context.Context, storeID uuid.UUID, draft *progress.Draft) error {
+	bank, err := s.repo.FindBank(ctx, storeID)
+	if err != nil {
+		return err
+	}
+	loc, err := s.repo.FindLocation(ctx, storeID)
+	if err != nil {
+		return err
+	}
+	applyBank(draft, bank)
+	applyLocation(draft, loc)
+	return nil
+}
+
+// require checks a store permission, hiding stores the caller can't see.
+func (s *service) require(ctx context.Context, userID, storeID uuid.UUID, permission storeaccess.Permission) error {
+	_, err := s.access.Require(ctx, userID, storeID, permission)
+	if errors.Is(err, storeaccess.ErrNotFound) {
+		return ErrNotFound
+	}
+	return err
 }
 
 // ownerAccess allows only the retailer who owns the store; staff can't change setup.

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AbhishekCS3459/find-me-backend/internal/availability"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -29,6 +30,11 @@ type Repository interface {
 	SaveBank(ctx context.Context, bank *Bank) (*Bank, error)
 	// Delete closes and soft-deletes the store; its history stays in the database.
 	Delete(ctx context.Context, id uuid.UUID) error
+	// FindLocation returns nil, nil when the store has no location yet.
+	FindLocation(ctx context.Context, storeID uuid.UUID) (*Location, error)
+	// SaveLocation creates or replaces the location and refreshes the store's
+	// search rows in the same transaction.
+	SaveLocation(ctx context.Context, loc *Location) (*Location, error)
 	DefaultCategoryID(ctx context.Context) (uuid.UUID, error)
 }
 
@@ -119,18 +125,28 @@ func (r *repository) UpdateLocked(
 ) (*Store, error) {
 	var store Store
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", id).First(&store).Error
+		// NO KEY UPDATE still serialises edits to the store, but unlike UPDATE it
+		// doesn't block stock changes, whose ledger rows reference the store. A
+		// visibility change below locks those stock rows, so UPDATE could deadlock.
+		err := tx.Clauses(clause.Locking{Strength: "NO KEY UPDATE"}).Where("id = ?", id).First(&store).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return ErrNotFound
 		}
 		if err != nil {
 			return err
 		}
+		wasSearchable := store.searchable()
 		if err := apply(&store); err != nil {
 			return err
 		}
 		store.UpdatedAt = time.Now().UTC()
-		return tx.Model(&store).Select(append(columns, "updated_at")).Updates(&store).Error
+		if err := tx.Model(&store).Select(append(columns, "updated_at")).Updates(&store).Error; err != nil {
+			return err
+		}
+		if store.searchable() != wasSearchable {
+			return availability.RefreshStore(tx, id)
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, err
@@ -202,7 +218,10 @@ func (r *repository) Delete(ctx context.Context, id uuid.UUID) error {
 		if closed.RowsAffected == 0 {
 			return ErrNotFound
 		}
-		return tx.Where("id = ?", id).Delete(&Store{}).Error
+		if err := tx.Where("id = ?", id).Delete(&Store{}).Error; err != nil {
+			return err
+		}
+		return availability.RefreshStore(tx, id)
 	})
 	if errors.Is(err, ErrNotFound) {
 		return err
@@ -226,6 +245,38 @@ func (r *repository) SaveBank(ctx context.Context, bank *Bank) (*Bank, error) {
 		return nil, fmt.Errorf("save store bank: %w", err)
 	}
 	return bank, nil
+}
+
+func (r *repository) FindLocation(ctx context.Context, storeID uuid.UUID) (*Location, error) {
+	var rows []Location
+	if err := r.db.WithContext(ctx).Where("store_id = ?", storeID).Limit(1).Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("find store location: %w", err)
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	return &rows[0], nil
+}
+
+func (r *repository) SaveLocation(ctx context.Context, loc *Location) (*Location, error) {
+	now := time.Now().UTC()
+	loc.CreatedAt, loc.UpdatedAt = now, now
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		err := tx.Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "store_id"}},
+			DoUpdates: clause.AssignmentColumns([]string{
+				"address_line", "city", "pincode", "lat", "lng", "service_area_radius_km", "updated_at",
+			}),
+		}).Create(loc).Error
+		if err != nil {
+			return err
+		}
+		return availability.RefreshStore(tx, loc.StoreID)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("save store location: %w", err)
+	}
+	return loc, nil
 }
 
 func (r *repository) DefaultCategoryID(ctx context.Context) (uuid.UUID, error) {
@@ -272,12 +323,16 @@ func (r *repository) attachSummary(ctx context.Context, store Store) (*Summary, 
 	if err != nil {
 		return nil, err
 	}
+	loc, err := r.FindLocation(ctx, store.ID)
+	if err != nil {
+		return nil, err
+	}
 	return &Summary{
 		Store:          store,
 		Images:         images,
 		ProductCount:   productCount,
 		TotalInventory: totalInventory,
 		LowStockCount:  lowStock,
-		Onboarding:     onboardingSummary(store, bank),
+		Onboarding:     onboardingSummary(store, bank, loc),
 	}, nil
 }

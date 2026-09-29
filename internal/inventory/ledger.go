@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AbhishekCS3459/find-me-backend/internal/availability"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
@@ -13,7 +14,8 @@ import (
 
 // Ledger applies inventory changes inside a transaction owned by the caller,
 // so other modules (e.g. adding a product with opening stock) can combine
-// their own writes with stock changes atomically.
+// their own writes with stock changes atomically. Every write also refreshes
+// the product's customer search row in that transaction.
 type Ledger struct{}
 
 func NewLedger() *Ledger { return &Ledger{} }
@@ -108,6 +110,9 @@ func (Ledger) List(tx *gorm.DB, in ListInput) (Item, error) {
 		if err != nil {
 			return Item{}, fmt.Errorf("list product: %w", err)
 		}
+		if err := availability.RefreshInventory(tx, row.ID); err != nil {
+			return Item{}, err
+		}
 		return row.item(), nil
 	case err != nil:
 		return Item{}, err
@@ -120,6 +125,9 @@ func (Ledger) List(tx *gorm.DB, in ListInput) (Item, error) {
 		WHERE id = ?`, now, in.LowStockThreshold, in.IsAvailable, now, row.ID).Error
 	if err != nil {
 		return Item{}, fmt.Errorf("relist product: %w", err)
+	}
+	if err := availability.RefreshInventory(tx, row.ID); err != nil {
+		return Item{}, err
 	}
 	row.UnlistedAt, row.LowStockThreshold, row.IsAvailable, row.UpdatedAt = nil, in.LowStockThreshold, in.IsAvailable, now
 	return row.item(), nil
@@ -144,7 +152,7 @@ func (Ledger) Unlist(tx *gorm.DB, storeID, variantID uuid.UUID) error {
 	if err := tx.Exec(`UPDATE inventory SET unlisted_at = ?, updated_at = ? WHERE id = ?`, now, now, row.ID).Error; err != nil {
 		return fmt.Errorf("unlist product: %w", err)
 	}
-	return nil
+	return availability.RefreshInventory(tx, row.ID)
 }
 
 // UpdateSettings changes listing options; it never touches stock.
@@ -170,6 +178,9 @@ func (Ledger) UpdateSettings(tx *gorm.DB, storeID, variantID uuid.UUID, s Settin
 		row.LowStockThreshold, row.IsAvailable, row.UpdatedAt, row.ID).Error
 	if err != nil {
 		return Item{}, fmt.Errorf("update listing settings: %w", err)
+	}
+	if err := availability.RefreshInventory(tx, row.ID); err != nil {
+		return Item{}, err
 	}
 	return row.item(), nil
 }
@@ -299,6 +310,9 @@ func (Ledger) record(tx *gorm.DB, row *inventoryRow, c change, meta entryMeta) (
 		entry.Reference, entry.Note, entry.BatchID, createdBy, entry.CreatedAt).Error
 	if err != nil {
 		return Result{}, fmt.Errorf("record inventory transaction: %w", err)
+	}
+	if err := availability.RefreshInventory(tx, row.ID); err != nil {
+		return Result{}, err
 	}
 
 	row.OnHandQuantity, row.ReservedQuantity, row.UpdatedAt = after.OnHand, after.Reserved, now

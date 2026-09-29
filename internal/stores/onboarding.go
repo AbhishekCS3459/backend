@@ -54,6 +54,17 @@ func applyBank(draft *progress.Draft, bank *Bank) {
 	draft.Bank = bank.draft()
 }
 
+// applyLocation shows the store's saved address and pin. The pin lives only in
+// store_location, so the shipping step completes once a location is saved; until
+// then the address typed so far stays in the draft for the form to restore.
+func applyLocation(draft *progress.Draft, loc *Location) {
+	if loc == nil {
+		draft.Shipping.Lat, draft.Shipping.Lng = nil, nil
+		return
+	}
+	draft.Shipping = loc.draft(draft.Shipping.Label)
+}
+
 // applyPayout suggests the retailer's own account for a store that doesn't
 // exist yet; it only becomes the store's account once saved through SaveBank.
 func applyPayout(draft *progress.Draft, profile *retailer.Profile) {
@@ -94,9 +105,10 @@ func onboardingView(store Store, draft progress.Draft) *progress.View {
 	return &progress.View{Status: overall, CurrentStep: current, Steps: steps, Data: &draft, UpdatedAt: &updated}
 }
 
-func onboardingSummary(store Store, bank *Bank) OnboardingSummary {
+func onboardingSummary(store Store, bank *Bank, loc *Location) OnboardingSummary {
 	draft := decodeDraft(store)
 	applyBank(&draft, bank)
+	applyLocation(&draft, loc)
 	view := onboardingView(store, draft)
 	done := 0
 	for _, step := range view.Steps {

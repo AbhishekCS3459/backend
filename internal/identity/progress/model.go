@@ -131,6 +131,10 @@ type Shipping struct {
 	Address string `json:"address"`
 	City    string `json:"city"`
 	Pin     string `json:"pin"`
+	// Store onboarding fills Lat and Lng only from the store's saved location,
+	// never from a client draft, so there a pin means the location is saved.
+	Lat *float64 `json:"lat"`
+	Lng *float64 `json:"lng"`
 }
 
 type Retailer struct {

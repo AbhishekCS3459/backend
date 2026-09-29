@@ -18,6 +18,7 @@ import (
 	"github.com/AbhishekCS3459/find-me-backend/internal/identity"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/database"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/mongodb"
+	"github.com/AbhishekCS3459/find-me-backend/internal/platform/outbox"
 )
 
 // @title           Find Me API
@@ -102,6 +103,9 @@ func run() error {
 		return fmt.Errorf("bootstrap admin user: %w", err)
 	}
 
+	stopPublisher := startOutboxPublisher(db, cfg.OutboxPublisherEnabled)
+	defer stopPublisher()
+
 	// Setup routes
 	router := SetupRoutes(db, mongoClient, cfg)
 
@@ -145,6 +149,26 @@ func run() error {
 
 	log.Info().Msg("server exited")
 	return nil
+}
+
+// startOutboxPublisher runs the publisher until the returned stop function is
+// called; stop waits for an in-flight batch to finish.
+func startOutboxPublisher(db *database.DB, enabled bool) (stop func()) {
+	if !enabled {
+		log.Info().Msg("outbox publisher disabled")
+		return func() {}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	publisher := outbox.NewPublisher(db.Gorm, outbox.LogSink{}, outbox.DefaultPublisherConfig())
+	go func() {
+		defer close(done)
+		publisher.Run(ctx)
+	}()
+	return func() {
+		cancel()
+		<-done
+	}
 }
 
 // connectMongo returns nil when MongoDB is not configured or unreachable, so the

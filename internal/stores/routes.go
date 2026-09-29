@@ -13,5 +13,7 @@ func (h *Handler) Routes() chi.Router {
 	r.Get("/{storeID}/onboarding", h.Onboarding)
 	r.Put("/{storeID}/onboarding", h.SaveOnboarding)
 	r.Put("/{storeID}/bank", h.SaveBank)
+	r.Get("/{storeID}/location", h.Location)
+	r.Put("/{storeID}/location", h.SaveLocation)
 	return r
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/database"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/httputil"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/mongodb"
+	"github.com/AbhishekCS3459/find-me-backend/internal/platform/version"
 )
 
 // dependencyTimeout bounds each dependency ping so an unreachable backend cannot
@@ -65,7 +66,7 @@ func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 		Environment: h.environment,
 		Timestamp:   time.Now().UTC().Format(time.RFC3339),
 		Uptime:      time.Since(startTime).String(),
-		Version:     "new version",
+		Version:     version.Get(),
 	}
 
 	ctx := r.Context()

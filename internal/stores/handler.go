@@ -6,6 +6,7 @@ import (
 
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/httputil"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/middleware"
+	"github.com/AbhishekCS3459/find-me-backend/internal/storeaccess"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
@@ -176,6 +177,41 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (h *Handler) Location(w http.ResponseWriter, r *http.Request) {
+	userID, storeID, ok := storeRequest(w, r)
+	if !ok {
+		return
+	}
+	loc, err := h.svc.Location(r.Context(), userID, storeID)
+	if err != nil {
+		writeServiceError(w, err, userID, "failed to load store location")
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, loc)
+}
+
+func (h *Handler) SaveLocation(w http.ResponseWriter, r *http.Request) {
+	userID, storeID, ok := storeRequest(w, r)
+	if !ok {
+		return
+	}
+	var req SaveLocationRequest
+	if err := httputil.DecodeJSON(r, &req); err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := httputil.ValidateStruct(&req); err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	loc, err := h.svc.SaveLocation(r.Context(), userID, storeID, &req)
+	if err != nil {
+		writeServiceError(w, err, userID, "failed to save store location")
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, loc)
+}
+
 func storeRequest(w http.ResponseWriter, r *http.Request) (userID, storeID uuid.UUID, ok bool) {
 	userID, ok = middleware.GetUserID(r.Context())
 	if !ok {
@@ -195,8 +231,12 @@ func writeServiceError(w http.ResponseWriter, err error, userID uuid.UUID, fallb
 	switch {
 	case errors.Is(err, ErrNotFound):
 		httputil.WriteError(w, http.StatusNotFound, "store not found")
-	case errors.Is(err, ErrNotOwner):
+	case errors.Is(err, ErrLocationNotSet):
+		httputil.WriteError(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, ErrNotOwner), errors.Is(err, storeaccess.ErrForbidden):
 		httputil.WriteError(w, http.StatusForbidden, err.Error())
+	case errors.Is(err, ErrLocationIncomplete):
+		httputil.WriteError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, ErrOnboardingComplete):
 		httputil.WriteError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, ErrNameTooLong), errors.Is(err, ErrBankIncomplete):

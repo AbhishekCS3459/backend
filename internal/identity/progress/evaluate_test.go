@@ -60,6 +60,19 @@ func TestEvaluateOverallCompletedOnlyAfterSubmit(t *testing.T) {
 	}
 }
 
+func TestShippingNeedsAFullAddressAndASavedPin(t *testing.T) {
+	draft := completeDraft()
+	draft.Shipping = Shipping{Address: "12 Market Road", City: "Bengaluru", Pin: "5600"}
+	steps, _, _ := Evaluate(draft)
+	want := []string{"Enter the 6-digit PIN code.", "Use your current location to pin the store."}
+	if steps[5].Status != StatusDraft || len(steps[5].Missing) != 2 ||
+		steps[5].Missing[0] != want[0] || steps[5].Missing[1] != want[1] {
+		t.Fatalf("shipping step %+v", steps[5])
+	}
+}
+
+var pinLat, pinLng = 12.9716, 77.5946
+
 func completeDraft() Draft {
 	return Draft{
 		Name: "Airport kiosk", Categories: StringList{"Groceries"},
@@ -68,7 +81,7 @@ func completeDraft() Draft {
 		GST:    "29ABCDE1234F1Z5", GSTVerified: true,
 		Brand:    Brand{Name: "The Greenery", Manufacturer: "The Greenery", Logo: "logo.png"},
 		Bank:     Bank{Holder: "Aman", Number: "123456789", IFSC: "HDFC0001234"},
-		Shipping: Shipping{Address: "12 Market Road"},
+		Shipping: Shipping{Address: "12 Market Road", City: "Bengaluru", Pin: "560001", Lat: &pinLat, Lng: &pinLng},
 		Retailer: Retailer{
 			LegalName: "The Greenery", OwnerName: "Aman", IDProofURL: "https://id", BusinessRegURL: "https://reg",
 			Payout: "qr", QRURL: "https://qr",

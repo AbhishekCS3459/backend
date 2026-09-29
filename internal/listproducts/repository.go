@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AbhishekCS3459/find-me-backend/internal/availability"
 	"github.com/AbhishekCS3459/find-me-backend/internal/inventory"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -185,6 +186,9 @@ func (r *repository) AddListing(
 		if req.Price != nil {
 			if err := tx.Model(&Variant{}).Where("id = ?", req.VariantID).Update("price", *req.Price).Error; err != nil {
 				return fmt.Errorf("update price: %w", err)
+			}
+			if err := availability.RefreshVariant(tx, req.VariantID); err != nil {
+				return err
 			}
 		}
 		return r.listWithOpeningStock(tx, actorID, storeID, req.VariantID, req.OpeningQuantity, req.LowStockThreshold, available)

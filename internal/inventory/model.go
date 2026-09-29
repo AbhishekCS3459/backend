@@ -7,6 +7,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/AbhishekCS3459/find-me-backend/internal/availability"
 	"github.com/google/uuid"
 )
 
@@ -194,9 +195,11 @@ func StockStatus(stock Stock, threshold int, isAvailable, listed bool) string {
 		return "unlisted"
 	case !isAvailable:
 		return "unavailable"
-	case stock.Available() <= 0:
+	}
+	switch availability.BucketFor(stock.Available(), threshold) {
+	case availability.Out:
 		return "out"
-	case stock.Available() <= threshold:
+	case availability.Low:
 		return "low"
 	default:
 		return "in_stock"
