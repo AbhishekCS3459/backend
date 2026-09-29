@@ -20,6 +20,13 @@ func receiveChange(quantity int) (change, error) {
 	return change{Type: TypeStockReceived, Delta: quantity}, nil
 }
 
+func saleChange(quantity int) (change, error) {
+	if quantity <= 0 || quantity > MaxChange {
+		return change{}, &ValidationError{Message: fmt.Sprintf("quantity must be between 1 and %d", MaxChange)}
+	}
+	return change{Type: TypeOfflineSale, Delta: -quantity}, nil
+}
+
 // adjustChange turns an adjustment into a change against the current, locked
 // stock. For COUNT the difference is always computed here, never by the client.
 func adjustChange(current Stock, req AdjustRequest) (change, error) {
@@ -65,6 +72,13 @@ func apply(current Stock, c change) (Stock, error) {
 	}
 	if next.OnHand >= next.Reserved {
 		return next, nil
+	}
+	if c.Type == TypeOfflineSale {
+		msg := fmt.Sprintf("Cannot sell %d: only %d %s free to sell", -c.Delta, max(current.Available(), 0), unitsAre(current.Available()))
+		if current.Reserved > 0 {
+			msg += fmt.Sprintf(" (%d held for online orders)", current.Reserved)
+		}
+		return Stock{}, &StockError{Message: msg + "."}
 	}
 	if c.Counted != nil {
 		return Stock{}, &StockError{Message: fmt.Sprintf(

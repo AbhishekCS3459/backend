@@ -24,6 +24,11 @@ type Repository interface {
 	UpdateLocked(ctx context.Context, id uuid.UUID, apply func(*Store) error, columns ...string) (*Store, error)
 	// Update changes the given details; a non-nil images slice replaces all photos.
 	Update(ctx context.Context, id uuid.UUID, name, description *string, images *[]string) (*Summary, error)
+	// FindBank returns nil, nil when the store has no payout account yet.
+	FindBank(ctx context.Context, storeID uuid.UUID) (*Bank, error)
+	SaveBank(ctx context.Context, bank *Bank) (*Bank, error)
+	// Delete closes and soft-deletes the store; its history stays in the database.
+	Delete(ctx context.Context, id uuid.UUID) error
 	DefaultCategoryID(ctx context.Context) (uuid.UUID, error)
 }
 
@@ -175,6 +180,54 @@ func (r *repository) Update(
 	return r.attachSummary(ctx, store)
 }
 
+func (r *repository) FindBank(ctx context.Context, storeID uuid.UUID) (*Bank, error) {
+	// Find rather than First: a store without an account yet is normal, not an error to log.
+	var rows []Bank
+	if err := r.db.WithContext(ctx).Where("store_id = ?", storeID).Limit(1).Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("find store bank: %w", err)
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	return &rows[0], nil
+}
+
+func (r *repository) Delete(ctx context.Context, id uuid.UUID) error {
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		closed := tx.Model(&Store{}).Where("id = ?", id).
+			Updates(map[string]any{"status": "INACTIVE", "is_open": false, "updated_at": time.Now().UTC()})
+		if closed.Error != nil {
+			return closed.Error
+		}
+		if closed.RowsAffected == 0 {
+			return ErrNotFound
+		}
+		return tx.Where("id = ?", id).Delete(&Store{}).Error
+	})
+	if errors.Is(err, ErrNotFound) {
+		return err
+	}
+	if err != nil {
+		return fmt.Errorf("delete store: %w", err)
+	}
+	return nil
+}
+
+func (r *repository) SaveBank(ctx context.Context, bank *Bank) (*Bank, error) {
+	now := time.Now().UTC()
+	bank.CreatedAt, bank.UpdatedAt = now, now
+	err := r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "store_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{
+			"method", "account_holder_name", "account_number", "ifsc", "bank_name", "qr_url", "updated_at",
+		}),
+	}).Create(bank).Error
+	if err != nil {
+		return nil, fmt.Errorf("save store bank: %w", err)
+	}
+	return bank, nil
+}
+
 func (r *repository) DefaultCategoryID(ctx context.Context) (uuid.UUID, error) {
 	var idStr string
 	err := r.db.WithContext(ctx).Raw(`SELECT id::text FROM category WHERE parent_category_id IS NULL ORDER BY created_at LIMIT 1`).Scan(&idStr).Error
@@ -215,12 +268,16 @@ func (r *repository) attachSummary(ctx context.Context, store Store) (*Summary, 
 		WHERE store_id = ? AND unlisted_at IS NULL
 	`, store.ID).Row().Scan(&productCount, &totalInventory, &lowStock)
 
+	bank, err := r.FindBank(ctx, store.ID)
+	if err != nil {
+		return nil, err
+	}
 	return &Summary{
 		Store:          store,
 		Images:         images,
 		ProductCount:   productCount,
 		TotalInventory: totalInventory,
 		LowStockCount:  lowStock,
-		Onboarding:     onboardingSummary(store),
+		Onboarding:     onboardingSummary(store, bank),
 	}, nil
 }

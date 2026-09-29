@@ -224,9 +224,9 @@ func TestReceiveBatchIsAllOrNothing(t *testing.T) {
 	ctx := context.Background()
 	before := f.count(t, `SELECT COUNT(*) FROM inventory_transaction WHERE store_id = ?`, f.storeID)
 
-	_, _, err := f.svc.ReceiveBatch(ctx, f.userID, f.storeID, key(), &ReceiveBatchRequest{
+	_, _, err := f.svc.ReceiveBatch(ctx, f.userID, f.storeID, key(), &BatchRequest{
 		Reference: "INV-9",
-		Items: []ReceiveBatchItem{
+		Items: []BatchItem{
 			{VariantID: f.variants[0], Quantity: 10},
 			{VariantID: f.variants[1], Quantity: 10},
 			{VariantID: uuid.New(), Quantity: 10},
@@ -240,9 +240,9 @@ func TestReceiveBatchIsAllOrNothing(t *testing.T) {
 	assert.Equal(t, 3, f.stock(t, f.variants[1]).OnHand)
 	assert.Equal(t, before, f.count(t, `SELECT COUNT(*) FROM inventory_transaction WHERE store_id = ?`, f.storeID))
 
-	res, _, err := f.svc.ReceiveBatch(ctx, f.userID, f.storeID, key(), &ReceiveBatchRequest{
+	res, _, err := f.svc.ReceiveBatch(ctx, f.userID, f.storeID, key(), &BatchRequest{
 		Reference: "INV-9",
-		Items: []ReceiveBatchItem{
+		Items: []BatchItem{
 			{VariantID: f.variants[0], Quantity: 10},
 			{VariantID: f.variants[1], Quantity: 4},
 		},
@@ -253,11 +253,87 @@ func TestReceiveBatchIsAllOrNothing(t *testing.T) {
 	assert.Equal(t, 7, res.Items[1].Inventory.OnHand)
 	assert.Equal(t, 2, f.count(t, `SELECT COUNT(*) FROM inventory_transaction WHERE batch_id = ?`, res.BatchID))
 
-	_, _, err = f.svc.ReceiveBatch(ctx, f.userID, f.storeID, key(), &ReceiveBatchRequest{
-		Items: []ReceiveBatchItem{{VariantID: f.variants[0], Quantity: 1}, {VariantID: f.variants[0], Quantity: 1}},
+	_, _, err = f.svc.ReceiveBatch(ctx, f.userID, f.storeID, key(), &BatchRequest{
+		Items: []BatchItem{{VariantID: f.variants[0], Quantity: 1}, {VariantID: f.variants[0], Quantity: 1}},
 	})
 	var ve *ValidationError
 	assert.True(t, errors.As(err, &ve), "duplicate products in one delivery are rejected")
+}
+
+func TestOfflineSale(t *testing.T) {
+	f := newFixture(t, 1, 10)
+	v := f.variants[0]
+	ctx := context.Background()
+	k := key()
+	req := &SellRequest{Quantity: 4, Note: "counter"}
+
+	res, _, err := f.svc.Sell(ctx, f.userID, f.storeID, v, k, req)
+	require.NoError(t, err)
+	assert.Equal(t, TypeOfflineSale, res.Transaction.Type)
+	assert.Equal(t, -4, res.Transaction.Quantity)
+	assert.Nil(t, res.Transaction.Reason)
+	assert.Equal(t, 6, res.Inventory.OnHand)
+
+	_, replayed, err := f.svc.Sell(ctx, f.userID, f.storeID, v, k, req)
+	require.NoError(t, err)
+	assert.True(t, replayed)
+	assert.Equal(t, 6, f.stock(t, v).OnHand, "a retried sale must not take stock twice")
+
+	_, _, err = f.svc.Receive(ctx, f.userID, f.storeID, v, k, &ReceiveRequest{Quantity: 4, Note: "counter"})
+	assert.ErrorIs(t, err, ErrKeyReused, "a sale key cannot be reused for a receive")
+}
+
+func TestOfflineSaleNeverSellsReservedUnits(t *testing.T) {
+	f := newFixture(t, 1, 10)
+	v := f.variants[0]
+	require.NoError(t, f.db.Exec(`UPDATE inventory SET reserved_quantity = 3 WHERE store_id = ?`, f.storeID).Error)
+
+	_, _, err := f.svc.Sell(context.Background(), f.userID, f.storeID, v, key(), &SellRequest{Quantity: 8})
+	var se *StockError
+	require.True(t, errors.As(err, &se), "got %v", err)
+	assert.Equal(t, "Cannot sell 8: only 7 units are free to sell (3 held for online orders).", se.Message)
+	assert.Equal(t, Stock{OnHand: 10, Reserved: 3}, f.stock(t, v))
+
+	res, _, err := f.svc.Sell(context.Background(), f.userID, f.storeID, v, key(), &SellRequest{Quantity: 7})
+	require.NoError(t, err)
+	assert.Equal(t, Stock{OnHand: 3, Reserved: 3}, Stock{OnHand: res.Inventory.OnHand, Reserved: res.Inventory.Reserved})
+}
+
+func TestSellBatchIsAllOrNothing(t *testing.T) {
+	f := newFixture(t, 2, 5)
+	ctx := context.Background()
+
+	_, _, err := f.svc.SellBatch(ctx, f.userID, f.storeID, key(), &BatchRequest{
+		Reference: "BILL-1",
+		Items:     []BatchItem{{VariantID: f.variants[0], Quantity: 2}, {VariantID: f.variants[1], Quantity: 6}},
+	})
+	var se *StockError
+	require.True(t, errors.As(err, &se), "got %v", err)
+	assert.Contains(t, se.Message, "Item 2: ")
+	assert.Equal(t, 5, f.stock(t, f.variants[0]).OnHand, "no line is applied when one fails")
+
+	res, _, err := f.svc.SellBatch(ctx, f.userID, f.storeID, key(), &BatchRequest{
+		Reference: "BILL-2",
+		Items:     []BatchItem{{VariantID: f.variants[0], Quantity: 2}, {VariantID: f.variants[1], Quantity: 5}},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 3, f.stock(t, f.variants[0]).OnHand)
+	assert.Equal(t, 0, f.stock(t, f.variants[1]).OnHand)
+	assert.Equal(t, 2, f.count(t, `SELECT COUNT(*) FROM inventory_transaction WHERE batch_id = ? AND type = 'OFFLINE_SALE'`, res.BatchID))
+}
+
+func TestCountCommand(t *testing.T) {
+	f := newFixture(t, 1, 20)
+	v := f.variants[0]
+
+	res, _, err := f.svc.Count(context.Background(), f.userID, f.storeID, v, key(), &CountRequest{CountedQuantity: intp(18)})
+	require.NoError(t, err)
+	assert.Equal(t, -2, res.Transaction.Quantity)
+	assert.Equal(t, 18, res.Inventory.OnHand)
+
+	_, _, err = f.svc.Count(context.Background(), f.userID, f.storeID, v, key(), &CountRequest{})
+	var ve *ValidationError
+	assert.True(t, errors.As(err, &ve), "a count needs the counted quantity")
 }
 
 func TestStockCountRecordsDifference(t *testing.T) {

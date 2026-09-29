@@ -22,7 +22,10 @@ const (
 type Service interface {
 	Get(ctx context.Context, userID, storeID, variantID uuid.UUID) (*Item, error)
 	Receive(ctx context.Context, userID, storeID, variantID uuid.UUID, key string, req *ReceiveRequest) (*Result, bool, error)
-	ReceiveBatch(ctx context.Context, userID, storeID uuid.UUID, key string, req *ReceiveBatchRequest) (*BatchResult, bool, error)
+	ReceiveBatch(ctx context.Context, userID, storeID uuid.UUID, key string, req *BatchRequest) (*BatchResult, bool, error)
+	Sell(ctx context.Context, userID, storeID, variantID uuid.UUID, key string, req *SellRequest) (*Result, bool, error)
+	SellBatch(ctx context.Context, userID, storeID uuid.UUID, key string, req *BatchRequest) (*BatchResult, bool, error)
+	Count(ctx context.Context, userID, storeID, variantID uuid.UUID, key string, req *CountRequest) (*Result, bool, error)
 	Adjust(ctx context.Context, userID, storeID, variantID uuid.UUID, key string, req *AdjustRequest) (*Result, bool, error)
 	History(ctx context.Context, userID, storeID, variantID uuid.UUID, cursor string, limit int) (*HistoryPage, error)
 }
@@ -75,16 +78,74 @@ func (s *service) Receive(
 // ReceiveBatch records a delivery of several products: every line is applied
 // or none is.
 func (s *service) ReceiveBatch(
-	ctx context.Context, userID, storeID uuid.UUID, key string, req *ReceiveBatchRequest,
+	ctx context.Context, userID, storeID uuid.UUID, key string, req *BatchRequest,
+) (*BatchResult, bool, error) {
+	return s.runBatch(ctx, userID, storeID, key, "receive_batch", req,
+		func(tx *gorm.DB, line BatchItem, batchID *uuid.UUID, actor Actor) (Result, error) {
+			return s.ledger.Receive(tx, ReceiveInput{
+				StoreID: storeID, VariantID: line.VariantID, Quantity: line.Quantity,
+				Reference: req.Reference, Note: req.Note, BatchID: batchID, Actor: actor,
+			})
+		})
+}
+
+func (s *service) Sell(
+	ctx context.Context, userID, storeID, variantID uuid.UUID, key string, req *SellRequest,
+) (*Result, bool, error) {
+	scope, err := s.authorizeWrite(ctx, userID, storeID, key, "sell", variantID, req)
+	if err != nil {
+		return nil, false, err
+	}
+	return runIdempotent(ctx, s.db, scope, func(tx *gorm.DB) (*Result, error) {
+		actor, err := ResolveActor(tx, userID)
+		if err != nil {
+			return nil, err
+		}
+		res, err := s.ledger.Sell(tx, SaleInput{
+			StoreID: storeID, VariantID: variantID, Quantity: req.Quantity,
+			Reference: req.Reference, Note: req.Note, Actor: actor,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return &res, nil
+	})
+}
+
+// SellBatch records one counter bill covering several products: every line is
+// applied or none is.
+func (s *service) SellBatch(
+	ctx context.Context, userID, storeID uuid.UUID, key string, req *BatchRequest,
+) (*BatchResult, bool, error) {
+	return s.runBatch(ctx, userID, storeID, key, "sell_batch", req,
+		func(tx *gorm.DB, line BatchItem, batchID *uuid.UUID, actor Actor) (Result, error) {
+			return s.ledger.Sell(tx, SaleInput{
+				StoreID: storeID, VariantID: line.VariantID, Quantity: line.Quantity,
+				Reference: req.Reference, Note: req.Note, BatchID: batchID, Actor: actor,
+			})
+		})
+}
+
+func (s *service) Count(
+	ctx context.Context, userID, storeID, variantID uuid.UUID, key string, req *CountRequest,
+) (*Result, bool, error) {
+	return s.Adjust(ctx, userID, storeID, variantID, key, &AdjustRequest{
+		Mode: ModeCount, CountedQuantity: req.CountedQuantity, Note: req.Note,
+	})
+}
+
+func (s *service) runBatch(
+	ctx context.Context, userID, storeID uuid.UUID, key, operation string, req *BatchRequest,
+	applyLine func(tx *gorm.DB, line BatchItem, batchID *uuid.UUID, actor Actor) (Result, error),
 ) (*BatchResult, bool, error) {
 	seen := make(map[uuid.UUID]bool, len(req.Items))
 	for _, item := range req.Items {
 		if seen[item.VariantID] {
-			return nil, false, &ValidationError{Message: "each product can appear only once in a delivery"}
+			return nil, false, &ValidationError{Message: "each product can appear only once"}
 		}
 		seen[item.VariantID] = true
 	}
-	scope, err := s.authorizeWrite(ctx, userID, storeID, key, "receive_batch", req)
+	scope, err := s.authorizeWrite(ctx, userID, storeID, key, operation, req)
 	if err != nil {
 		return nil, false, err
 	}
@@ -94,7 +155,7 @@ func (s *service) ReceiveBatch(
 			return nil, err
 		}
 		batchID := uuid.New()
-		// Lock rows in a fixed order so two deliveries touching the same
+		// Lock rows in a fixed order so two batches touching the same
 		// products cannot deadlock.
 		order := make([]int, len(req.Items))
 		for i := range order {
@@ -105,11 +166,7 @@ func (s *service) ReceiveBatch(
 		})
 		results := make([]Result, len(req.Items))
 		for _, i := range order {
-			line := req.Items[i]
-			res, err := s.ledger.Receive(tx, ReceiveInput{
-				StoreID: storeID, VariantID: line.VariantID, Quantity: line.Quantity,
-				Reference: req.Reference, Note: req.Note, BatchID: &batchID, Actor: actor,
-			})
+			res, err := applyLine(tx, req.Items[i], &batchID, actor)
 			if err != nil {
 				return nil, lineError(i, err)
 			}

@@ -28,6 +28,25 @@ func TestEvaluateCompletesEarlierStepsOnly(t *testing.T) {
 	}
 }
 
+func TestEvaluateJudgesEachStepOnItsOwn(t *testing.T) {
+	draft := completeDraft()
+	draft.Spoc.Phone = ""
+	steps, _, _ := Evaluate(draft)
+	if steps[1].Status != StatusDraft || len(steps[1].Missing) != 1 || steps[1].Missing[0] != "Enter the contact phone." {
+		t.Fatalf("business step %+v", steps[1])
+	}
+	for _, i := range []int{2, 3, 4, 5} {
+		if steps[i].Status != StatusCompleted || steps[i].Missing != nil {
+			t.Fatalf("step %s should stay completed, got %+v", steps[i].Key, steps[i])
+		}
+	}
+	draft.Submitted = true
+	steps, overall, current := Evaluate(draft)
+	if steps[6].Status != StatusDraft || overall != StatusDraft || current != "business_details" {
+		t.Fatalf("submit needs every step: %+v %s %s", steps[6], overall, current)
+	}
+}
+
 func TestEvaluateOverallCompletedOnlyAfterSubmit(t *testing.T) {
 	draft := completeDraft()
 	steps, overall, current := Evaluate(draft)

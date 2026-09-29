@@ -3,6 +3,7 @@ package stores
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/AbhishekCS3459/find-me-backend/internal/identity/progress"
 	"github.com/AbhishekCS3459/find-me-backend/internal/identity/retailer"
@@ -10,11 +11,16 @@ import (
 
 // IncompleteError rejects a submission while a required step is unfinished.
 type IncompleteError struct {
-	Step string
+	Step    string
+	Missing []string
 }
 
 func (e *IncompleteError) Error() string {
-	return fmt.Sprintf("finish %s before submitting this store", progress.StepLabel(e.Step))
+	msg := fmt.Sprintf("finish %s before submitting this store", progress.StepLabel(e.Step))
+	if len(e.Missing) > 0 {
+		msg += ": " + strings.Join(e.Missing, " ")
+	}
+	return msg
 }
 
 func decodeDraft(store Store) progress.Draft {
@@ -42,16 +48,36 @@ func applyRetailer(draft *progress.Draft, profile *retailer.Profile) {
 	}
 }
 
-// firstIncomplete returns the first unfinished step before "verify & submit".
-func firstIncomplete(draft progress.Draft) string {
+// applyBank shows the store's saved payout account. It lives in
+// store_bank_details, never in the onboarding payload, so the two can't drift.
+func applyBank(draft *progress.Draft, bank *Bank) {
+	draft.Bank = bank.draft()
+}
+
+// applyPayout suggests the retailer's own account for a store that doesn't
+// exist yet; it only becomes the store's account once saved through SaveBank.
+func applyPayout(draft *progress.Draft, profile *retailer.Profile) {
+	if profile == nil || profile.Bank == nil {
+		return
+	}
+	bank := profile.Bank
+	if bank.QRURL != "" {
+		draft.Bank = progress.Bank{Method: "qr", QRURL: bank.QRURL}
+		return
+	}
+	draft.Bank = progress.Bank{Method: "bank", Holder: bank.AccountHolderName, Number: bank.AccountNumber, IFSC: bank.IFSC}
+}
+
+// firstIncomplete returns the first unfinished step before "verify & submit", or nil.
+func firstIncomplete(draft progress.Draft) *IncompleteError {
 	draft.Submitted = false
 	steps, _, _ := progress.Evaluate(draft)
 	for _, step := range steps[:len(steps)-1] {
 		if step.Status != progress.StatusCompleted {
-			return step.Key
+			return &IncompleteError{Step: step.Key, Missing: step.Missing}
 		}
 	}
-	return ""
+	return nil
 }
 
 // onboardingView is the full setup state. A COMPLETED store is final even if
@@ -60,7 +86,7 @@ func onboardingView(store Store, draft progress.Draft) *progress.View {
 	steps, overall, current := progress.Evaluate(draft)
 	if store.OnboardingStatus == OnboardingCompleted {
 		for i := range steps {
-			steps[i].Status = progress.StatusCompleted
+			steps[i].Status, steps[i].Missing = progress.StatusCompleted, nil
 		}
 		overall, current = progress.StatusCompleted, steps[len(steps)-1].Key
 	}
@@ -68,8 +94,10 @@ func onboardingView(store Store, draft progress.Draft) *progress.View {
 	return &progress.View{Status: overall, CurrentStep: current, Steps: steps, Data: &draft, UpdatedAt: &updated}
 }
 
-func onboardingSummary(store Store) OnboardingSummary {
-	view := onboardingView(store, decodeDraft(store))
+func onboardingSummary(store Store, bank *Bank) OnboardingSummary {
+	draft := decodeDraft(store)
+	applyBank(&draft, bank)
+	view := onboardingView(store, draft)
 	done := 0
 	for _, step := range view.Steps {
 		if step.Status == progress.StatusCompleted {

@@ -73,13 +73,13 @@ const accessSelect = `
 	SELECT s.id AS store_id, s.retailer_id, 'OWNER' AS role, '' AS permissions, s.created_at
 	FROM store s
 	JOIN retailers r ON r.id = s.retailer_id
-	WHERE r.user_id = @user %s
+	WHERE r.user_id = @user AND s.deleted_at IS NULL %s
 	UNION ALL
 	SELECT s.id, s.retailer_id, sm.role, array_to_string(sm.permissions, ','), s.created_at
 	FROM staff_member sm
 	JOIN store s ON s.id = sm.store_id
 	JOIN retailers r ON r.id = s.retailer_id
-	WHERE sm.user_id = @user AND sm.is_active AND r.user_id <> @user %s
+	WHERE sm.user_id = @user AND sm.is_active AND r.user_id <> @user AND s.deleted_at IS NULL %s
 	ORDER BY created_at DESC`
 
 func (r *resolver) Store(ctx context.Context, userID, storeID uuid.UUID) (*Access, error) {

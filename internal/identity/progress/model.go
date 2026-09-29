@@ -148,6 +148,8 @@ type Retailer struct {
 type Step struct {
 	Key    string `json:"key"`
 	Status string `json:"status"`
+	// Missing says what's left to fill in for this step, in the retailer's words.
+	Missing []string `json:"missing,omitempty"`
 }
 
 type View struct {

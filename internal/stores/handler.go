@@ -97,6 +97,20 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusOK, row)
 }
 
+func (h *Handler) NewOnboarding(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok {
+		httputil.WriteError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	view, err := h.svc.NewOnboarding(r.Context(), userID)
+	if err != nil {
+		writeServiceError(w, err, userID, "failed to load store setup")
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, view)
+}
+
 func (h *Handler) Onboarding(w http.ResponseWriter, r *http.Request) {
 	userID, storeID, ok := storeRequest(w, r)
 	if !ok {
@@ -128,6 +142,40 @@ func (h *Handler) SaveOnboarding(w http.ResponseWriter, r *http.Request) {
 	httputil.WriteJSON(w, http.StatusOK, view)
 }
 
+func (h *Handler) SaveBank(w http.ResponseWriter, r *http.Request) {
+	userID, storeID, ok := storeRequest(w, r)
+	if !ok {
+		return
+	}
+	var req SaveBankRequest
+	if err := httputil.DecodeJSON(r, &req); err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := httputil.ValidateStruct(&req); err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	view, err := h.svc.SaveBank(r.Context(), userID, storeID, &req)
+	if err != nil {
+		writeServiceError(w, err, userID, "failed to save store bank details")
+		return
+	}
+	httputil.WriteJSON(w, http.StatusOK, view)
+}
+
+func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
+	userID, storeID, ok := storeRequest(w, r)
+	if !ok {
+		return
+	}
+	if err := h.svc.Delete(r.Context(), userID, storeID); err != nil {
+		writeServiceError(w, err, userID, "failed to delete store")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func storeRequest(w http.ResponseWriter, r *http.Request) (userID, storeID uuid.UUID, ok bool) {
 	userID, ok = middleware.GetUserID(r.Context())
 	if !ok {
@@ -151,7 +199,7 @@ func writeServiceError(w http.ResponseWriter, err error, userID uuid.UUID, fallb
 		httputil.WriteError(w, http.StatusForbidden, err.Error())
 	case errors.Is(err, ErrOnboardingComplete):
 		httputil.WriteError(w, http.StatusConflict, err.Error())
-	case errors.Is(err, ErrNameTooLong):
+	case errors.Is(err, ErrNameTooLong), errors.Is(err, ErrBankIncomplete):
 		httputil.WriteError(w, http.StatusBadRequest, err.Error())
 	case errors.As(err, &incomplete):
 		httputil.WriteError(w, http.StatusUnprocessableEntity, err.Error())

@@ -58,9 +58,11 @@ type UpsertProfileRequest struct {
 	OwnerName string `json:"owner_name" validate:"required,min=2,max=255"`
 }
 
+// UpsertKYCRequest saves whichever documents are uploaded so far; the retailer
+// step only counts as done once both are present.
 type UpsertKYCRequest struct {
-	IDProofURL     string `json:"id_proof_url" validate:"required,url,max=255"`
-	BusinessRegURL string `json:"business_reg_url" validate:"required,url,max=255"`
+	IDProofURL     string `json:"id_proof_url" validate:"required_without=BusinessRegURL,omitempty,url,max=255"`
+	BusinessRegURL string `json:"business_reg_url" validate:"required_without=IDProofURL,omitempty,url,max=255"`
 }
 
 type UpsertBankRequest struct {

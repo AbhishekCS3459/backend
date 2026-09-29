@@ -24,6 +24,20 @@ func TestReceiveChange(t *testing.T) {
 	}
 }
 
+func TestSaleChange(t *testing.T) {
+	c, err := saleChange(3)
+	require.NoError(t, err)
+	assert.Equal(t, TypeOfflineSale, c.Type)
+	assert.Equal(t, -3, c.Delta)
+	assert.Nil(t, c.Reason)
+
+	for _, qty := range []int{0, -1, MaxChange + 1} {
+		_, err := saleChange(qty)
+		var ve *ValidationError
+		assert.True(t, errors.As(err, &ve), "quantity %d should be rejected", qty)
+	}
+}
+
 func TestAdjustChangeMode(t *testing.T) {
 	current := Stock{OnHand: 20, Reserved: 2}
 
@@ -135,6 +149,24 @@ func TestApply(t *testing.T) {
 			current: Stock{OnHand: 10, Reserved: 7},
 			change:  change{Delta: -6, Counted: intp(4)},
 			wantErr: "Cannot set stock to 4 because 7 units are currently reserved.",
+		},
+		{
+			name:    "sale within free stock",
+			current: Stock{OnHand: 10, Reserved: 3},
+			change:  change{Type: TypeOfflineSale, Delta: -7},
+			want:    Stock{OnHand: 3, Reserved: 3},
+		},
+		{
+			name:    "sale of reserved units",
+			current: Stock{OnHand: 10, Reserved: 3},
+			change:  change{Type: TypeOfflineSale, Delta: -8},
+			wantErr: "Cannot sell 8: only 7 units are free to sell (3 held for online orders).",
+		},
+		{
+			name:    "sale beyond stock",
+			current: Stock{OnHand: 1},
+			change:  change{Type: TypeOfflineSale, Delta: -2},
+			wantErr: "Cannot sell 2: only 1 unit is free to sell.",
 		},
 		{
 			name:    "above maximum",

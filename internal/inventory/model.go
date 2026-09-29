@@ -16,6 +16,7 @@ const (
 	TypeOpeningBalance TxType = "OPENING_BALANCE"
 	TypeStockReceived  TxType = "STOCK_RECEIVED"
 	TypeAdjustment     TxType = "ADJUSTMENT"
+	TypeOfflineSale    TxType = "OFFLINE_SALE"
 )
 
 type Reason string
@@ -136,15 +137,30 @@ type ReceiveRequest struct {
 	Note      string `json:"note" validate:"max=500"`
 }
 
-type ReceiveBatchItem struct {
+// SellRequest records units sold over the counter.
+type SellRequest struct {
+	Quantity  int    `json:"quantity" validate:"required,gt=0,max=1000000"`
+	Reference string `json:"reference" validate:"max=100"`
+	Note      string `json:"note" validate:"max=500"`
+}
+
+// CountRequest sets stock to the physically counted quantity.
+type CountRequest struct {
+	CountedQuantity *int   `json:"counted_quantity"`
+	Note            string `json:"note" validate:"max=500"`
+}
+
+type BatchItem struct {
 	VariantID uuid.UUID `json:"variant_id" validate:"required"`
 	Quantity  int       `json:"quantity" validate:"required,gt=0,max=1000000"`
 }
 
-type ReceiveBatchRequest struct {
-	Reference string             `json:"reference" validate:"max=100"`
-	Note      string             `json:"note" validate:"max=500"`
-	Items     []ReceiveBatchItem `json:"items" validate:"required,min=1,max=200,dive"`
+// BatchRequest is a delivery (receive) or a counter bill (sell) covering
+// several products.
+type BatchRequest struct {
+	Reference string      `json:"reference" validate:"max=100"`
+	Note      string      `json:"note" validate:"max=500"`
+	Items     []BatchItem `json:"items" validate:"required,min=1,max=200,dive"`
 }
 
 // AdjustRequest is either a CHANGE (signed quantity with a reason) or a COUNT

@@ -14,11 +14,15 @@ import (
 	"github.com/google/uuid"
 )
 
+// untitledStore names a draft until the retailer types a name in setup.
+const untitledStore = "Untitled store"
+
 var (
 	ErrNoRetailer         = errors.New("complete the retailer profile before managing stores")
 	ErrNotOwner           = errors.New("only the store owner can change store details and setup")
 	ErrOnboardingComplete = errors.New("this store's setup is already complete")
 	ErrNameTooLong        = errors.New("store name must be at most 255 characters")
+	ErrBankIncomplete     = errors.New("enter the account holder, account number and IFSC, or upload a payment QR")
 )
 
 type Service interface {
@@ -28,10 +32,18 @@ type Service interface {
 	Create(ctx context.Context, userID uuid.UUID, req *CreateRequest) (*Summary, error)
 	Get(ctx context.Context, userID, storeID uuid.UUID) (*Summary, error)
 	Update(ctx context.Context, userID, storeID uuid.UUID, req *UpdateRequest) (*Summary, error)
+	// NewOnboarding is the setup a store starts with before it's created,
+	// so steps already covered by the retailer profile show as completed.
+	NewOnboarding(ctx context.Context, userID uuid.UUID) (*progress.View, error)
 	Onboarding(ctx context.Context, userID, storeID uuid.UUID) (*progress.View, error)
 	// SaveOnboarding stores the draft. With Submitted set it completes the store,
 	// or returns *IncompleteError naming the first unfinished step.
 	SaveOnboarding(ctx context.Context, userID, storeID uuid.UUID, draft progress.Draft) (*progress.View, error)
+	// SaveBank sets where this store is paid; it can change after setup is complete.
+	SaveBank(ctx context.Context, userID, storeID uuid.UUID, req *SaveBankRequest) (*progress.View, error)
+	// Delete removes the store for its owner and staff. Orders, stock history
+	// and payouts are kept for records.
+	Delete(ctx context.Context, userID, storeID uuid.UUID) error
 }
 
 type service struct {
@@ -88,16 +100,21 @@ func (s *service) Create(ctx context.Context, userID uuid.UUID, req *CreateReque
 	}
 	draft.Name = name
 	draft.Submitted = false
+	draft.Bank = progress.Bank{}
 	applyRetailer(&draft, profile)
 	payload, err := json.Marshal(draft)
 	if err != nil {
 		return nil, err
 	}
 
+	storeName := name
+	if utf8.RuneCountInString(storeName) < 2 {
+		storeName = untitledStore
+	}
 	store := &Store{
 		RetailerID:       profile.ID,
 		CategoryID:       categoryID,
-		Name:             name,
+		Name:             storeName,
 		Description:      strings.TrimSpace(req.Description),
 		IsOpen:           true,
 		OnboardingStatus: OnboardingDraft,
@@ -157,6 +174,18 @@ func (s *service) Update(ctx context.Context, userID, storeID uuid.UUID, req *Up
 	return summary, nil
 }
 
+func (s *service) NewOnboarding(ctx context.Context, userID uuid.UUID) (*progress.View, error) {
+	profile, err := s.retailerProfile(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	var draft progress.Draft
+	applyRetailer(&draft, profile)
+	applyPayout(&draft, profile)
+	steps, overall, current := progress.Evaluate(draft)
+	return &progress.View{Status: overall, CurrentStep: current, Steps: steps, Data: &draft}, nil
+}
+
 func (s *service) Onboarding(ctx context.Context, userID, storeID uuid.UUID) (*progress.View, error) {
 	if _, err := s.ownerAccess(ctx, userID, storeID); err != nil {
 		return nil, err
@@ -173,6 +202,11 @@ func (s *service) Onboarding(ctx context.Context, userID, storeID uuid.UUID) (*p
 		}
 		applyRetailer(&draft, profile)
 	}
+	bank, err := s.repo.FindBank(ctx, storeID)
+	if err != nil {
+		return nil, err
+	}
+	applyBank(&draft, bank)
 	return onboardingView(*store, draft), nil
 }
 
@@ -193,16 +227,23 @@ func (s *service) SaveOnboarding(
 		return nil, err
 	}
 	applyRetailer(&draft, profile)
+	bank, err := s.repo.FindBank(ctx, storeID)
+	if err != nil {
+		return nil, err
+	}
+	applyBank(&draft, bank)
 
 	submit := draft.Submitted
 	draft.Submitted = false
 	if submit {
-		if step := firstIncomplete(draft); step != "" {
-			return nil, &IncompleteError{Step: step}
+		if incomplete := firstIncomplete(draft); incomplete != nil {
+			return nil, incomplete
 		}
 		draft.Submitted = true
 	}
-	payload, err := json.Marshal(draft)
+	persisted := draft
+	persisted.Bank = progress.Bank{}
+	payload, err := json.Marshal(persisted)
 	if err != nil {
 		return nil, err
 	}
@@ -227,6 +268,37 @@ func (s *service) SaveOnboarding(
 		return nil, err
 	}
 	return onboardingView(*store, draft), nil
+}
+
+func (s *service) SaveBank(
+	ctx context.Context, userID, storeID uuid.UUID, req *SaveBankRequest,
+) (*progress.View, error) {
+	if _, err := s.ownerAccess(ctx, userID, storeID); err != nil {
+		return nil, err
+	}
+	bank := &Bank{StoreID: storeID, Method: req.Method}
+	if req.Method == "qr" {
+		bank.QRURL = strings.TrimSpace(req.QRURL)
+	} else {
+		bank.AccountHolderName = strings.TrimSpace(req.Holder)
+		bank.AccountNumber = strings.TrimSpace(req.Number)
+		bank.IFSC = strings.ToUpper(strings.TrimSpace(req.IFSC))
+		bank.BankName = strings.TrimSpace(req.Bank)
+	}
+	if !progress.BankComplete(bank.draft()) {
+		return nil, ErrBankIncomplete
+	}
+	if _, err := s.repo.SaveBank(ctx, bank); err != nil {
+		return nil, err
+	}
+	return s.Onboarding(ctx, userID, storeID)
+}
+
+func (s *service) Delete(ctx context.Context, userID, storeID uuid.UUID) error {
+	if _, err := s.ownerAccess(ctx, userID, storeID); err != nil {
+		return err
+	}
+	return s.repo.Delete(ctx, storeID)
 }
 
 // ownerAccess allows only the retailer who owns the store; staff can't change setup.

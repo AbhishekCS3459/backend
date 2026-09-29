@@ -3,18 +3,19 @@ package progress
 import "strings"
 
 type stepRule struct {
-	key  string
-	done func(Draft) bool
+	key string
+	// missing lists what the retailer still has to fill in; empty means the step is done.
+	missing func(Draft) []string
 }
 
 var stepRules = []stepRule{
-	{key: "retailer_profile", done: retailerDone},
-	{key: "business_details", done: businessDone},
-	{key: "seller_details", done: sellerDone},
-	{key: "brand_details", done: brandDone},
-	{key: "bank_details", done: bankDone},
-	{key: "shipping_location", done: shippingDone},
-	{key: "verify_submit", done: func(Draft) bool { return false }},
+	{key: "retailer_profile", missing: retailerMissing},
+	{key: "business_details", missing: businessMissing},
+	{key: "seller_details", missing: sellerMissing},
+	{key: "brand_details", missing: brandMissing},
+	{key: "bank_details", missing: func(draft Draft) []string { return BankMissing(draft.Bank) }},
+	{key: "shipping_location", missing: shippingMissing},
+	{key: "verify_submit", missing: func(Draft) []string { return nil }},
 }
 
 var stepLabels = map[string]string{
@@ -35,21 +36,26 @@ func StepLabel(key string) string {
 	return key
 }
 
+// Evaluate judges each step on its own details, so a finished step shows as
+// completed even while an earlier one is still open. "Verify & submit" is
+// completed only once every other step is done and the draft was submitted.
 func Evaluate(draft Draft) (steps []Step, overall, current string) {
 	steps = make([]Step, len(stepRules))
-	previousDone := true
+	allDone := true
 	for i, rule := range stepRules {
-		done := previousDone && rule.done(draft)
+		step := Step{Key: rule.key, Status: StatusDraft}
 		if rule.key == "verify_submit" {
-			done = previousDone && draft.Submitted
-		}
-		status := StatusDraft
-		if done {
-			status = StatusCompleted
+			if allDone && draft.Submitted {
+				step.Status = StatusCompleted
+			} else if !allDone {
+				step.Missing = []string{"Finish every step above."}
+			}
+		} else if step.Missing = rule.missing(draft); len(step.Missing) == 0 {
+			step.Status = StatusCompleted
 		} else {
-			previousDone = false
+			allDone = false
 		}
-		steps[i] = Step{Key: rule.key, Status: status}
+		steps[i] = step
 	}
 
 	overall = StatusCompleted
@@ -64,32 +70,64 @@ func Evaluate(draft Draft) (steps []Step, overall, current string) {
 	return steps, overall, current
 }
 
-func retailerDone(draft Draft) bool {
-	retailer := draft.Retailer
-	return filled(retailer.LegalName) && filled(retailer.OwnerName) && filled(retailer.IDProofURL) && filled(retailer.BusinessRegURL)
+// BankComplete reports whether the payout details are enough to pay out to.
+func BankComplete(bank Bank) bool {
+	return len(BankMissing(bank)) == 0
 }
 
-func businessDone(draft Draft) bool {
-	return filled(draft.Name) && len(draft.Categories) > 0 && hasChannel(draft.Retail) && filled(draft.Spoc.Name) && filled(draft.Spoc.Role) && filled(draft.Spoc.Email) && filled(draft.Spoc.Phone)
-}
-
-func sellerDone(draft Draft) bool {
-	return draft.GSTVerified && len(strings.TrimSpace(draft.GST)) >= 15
-}
-
-func brandDone(draft Draft) bool {
-	return filled(draft.Brand.Name) && filled(draft.Brand.Manufacturer) && filled(draft.Brand.Logo)
-}
-
-func bankDone(draft Draft) bool {
-	if draft.Bank.Method == "qr" {
-		return filled(draft.Bank.QRURL)
+func BankMissing(bank Bank) []string {
+	if bank.Method == "qr" {
+		return need(nil, filled(bank.QRURL), "Upload a payment QR.")
 	}
-	return filled(draft.Bank.Holder) && len(strings.TrimSpace(draft.Bank.Number)) >= 6 && len(strings.TrimSpace(draft.Bank.IFSC)) >= 4
+	var missing []string
+	missing = need(missing, filled(bank.Holder), "Enter the account holder.")
+	missing = need(missing, len(strings.TrimSpace(bank.Number)) >= 6, "Enter the account number.")
+	return need(missing, len(strings.TrimSpace(bank.IFSC)) >= 4, "Enter the IFSC.")
 }
 
-func shippingDone(draft Draft) bool {
-	return filled(draft.Shipping.Address)
+func retailerMissing(draft Draft) []string {
+	retailer := draft.Retailer
+	var missing []string
+	missing = need(missing, filled(retailer.LegalName), "Enter the legal name.")
+	missing = need(missing, filled(retailer.OwnerName), "Enter the owner name.")
+	missing = need(missing, filled(retailer.IDProofURL), "Upload an ID proof.")
+	return need(missing, filled(retailer.BusinessRegURL), "Upload the business registration.")
+}
+
+func businessMissing(draft Draft) []string {
+	var missing []string
+	missing = need(missing, len([]rune(strings.TrimSpace(draft.Name))) >= 2, "Enter the store name.")
+	missing = need(missing, len(draft.Categories) > 0, "Pick at least one category.")
+	missing = need(missing, hasChannel(draft.Retail), "Choose a retail channel.")
+	missing = need(missing, filled(draft.Spoc.Name), "Enter the contact name.")
+	missing = need(missing, filled(draft.Spoc.Role), "Enter the contact role.")
+	missing = need(missing, filled(draft.Spoc.Email), "Enter the contact email.")
+	return need(missing, filled(draft.Spoc.Phone), "Enter the contact phone.")
+}
+
+func sellerMissing(draft Draft) []string {
+	if len(strings.TrimSpace(draft.GST)) < 15 {
+		return []string{"Enter the 15-character GSTIN."}
+	}
+	return need(nil, draft.GSTVerified, "Verify the GSTIN.")
+}
+
+func brandMissing(draft Draft) []string {
+	var missing []string
+	missing = need(missing, filled(draft.Brand.Name), "Enter the brand name.")
+	missing = need(missing, filled(draft.Brand.Manufacturer), "Enter the manufacturer.")
+	return need(missing, filled(draft.Brand.Logo), "Upload the brand logo.")
+}
+
+func shippingMissing(draft Draft) []string {
+	return need(nil, filled(draft.Shipping.Address), "Enter the shipping address.")
+}
+
+func need(missing []string, ok bool, reason string) []string {
+	if ok {
+		return missing
+	}
+	return append(missing, reason)
 }
 
 func hasChannel(rows []Channel) bool {

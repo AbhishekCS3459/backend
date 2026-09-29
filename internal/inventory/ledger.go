@@ -197,6 +197,31 @@ func (l Ledger) Receive(tx *gorm.DB, in ReceiveInput) (Result, error) {
 	return l.record(tx, row, c, entryMeta{reference: in.Reference, note: in.Note, batchID: in.BatchID, actor: in.Actor})
 }
 
+// SaleInput describes units sold over the counter, outside online orders.
+type SaleInput struct {
+	StoreID   uuid.UUID
+	VariantID uuid.UUID
+	Quantity  int
+	Reference string
+	Note      string
+	BatchID   *uuid.UUID
+	Actor     Actor
+}
+
+// Sell takes sold units out of stock. Units reserved for online orders are
+// never sold, so on_hand cannot drop below reserved.
+func (l Ledger) Sell(tx *gorm.DB, in SaleInput) (Result, error) {
+	c, err := saleChange(in.Quantity)
+	if err != nil {
+		return Result{}, err
+	}
+	row, err := lockListed(tx, in.StoreID, in.VariantID)
+	if err != nil {
+		return Result{}, err
+	}
+	return l.record(tx, row, c, entryMeta{reference: in.Reference, note: in.Note, batchID: in.BatchID, actor: in.Actor})
+}
+
 func (l Ledger) Adjust(tx *gorm.DB, storeID, variantID uuid.UUID, req AdjustRequest, actor Actor) (Result, error) {
 	row, err := lockListed(tx, storeID, variantID)
 	if err != nil {

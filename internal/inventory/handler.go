@@ -61,13 +61,64 @@ func (h *Handler) ReceiveBatch(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var req ReceiveBatchRequest
+	var req BatchRequest
 	if !decode(w, r, &req) {
 		return
 	}
 	res, replayed, err := h.svc.ReceiveBatch(r.Context(), userID, storeID, r.Header.Get(IdempotencyKeyHeader), &req)
 	if err != nil {
 		writeErr(w, err, userID, "failed to receive delivery")
+		return
+	}
+	writeResult(w, res, replayed)
+}
+
+func (h *Handler) Sell(w http.ResponseWriter, r *http.Request) {
+	userID, storeID, variantID, ok := variantIDs(w, r)
+	if !ok {
+		return
+	}
+	var req SellRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	res, replayed, err := h.svc.Sell(r.Context(), userID, storeID, variantID, r.Header.Get(IdempotencyKeyHeader), &req)
+	if err != nil {
+		writeErr(w, err, userID, "failed to record sale")
+		return
+	}
+	writeResult(w, res, replayed)
+}
+
+func (h *Handler) SellBatch(w http.ResponseWriter, r *http.Request) {
+	userID, storeID, ok := storeIDs(w, r)
+	if !ok {
+		return
+	}
+	var req BatchRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	res, replayed, err := h.svc.SellBatch(r.Context(), userID, storeID, r.Header.Get(IdempotencyKeyHeader), &req)
+	if err != nil {
+		writeErr(w, err, userID, "failed to record sale")
+		return
+	}
+	writeResult(w, res, replayed)
+}
+
+func (h *Handler) Count(w http.ResponseWriter, r *http.Request) {
+	userID, storeID, variantID, ok := variantIDs(w, r)
+	if !ok {
+		return
+	}
+	var req CountRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	res, replayed, err := h.svc.Count(r.Context(), userID, storeID, variantID, r.Header.Get(IdempotencyKeyHeader), &req)
+	if err != nil {
+		writeErr(w, err, userID, "failed to save stock count")
 		return
 	}
 	writeResult(w, res, replayed)

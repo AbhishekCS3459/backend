@@ -111,7 +111,7 @@ func (r *repository) Memberships(ctx context.Context, userID uuid.UUID) ([]membe
 		SELECT sm.store_id, s.retailer_id, sm.role
 		FROM staff_member sm
 		JOIN store s ON s.id = sm.store_id
-		WHERE sm.user_id = ?`, userID).Scan(&rows).Error
+		WHERE sm.user_id = ? AND s.deleted_at IS NULL`, userID).Scan(&rows).Error
 	if err != nil {
 		return nil, fmt.Errorf("list memberships: %w", err)
 	}
