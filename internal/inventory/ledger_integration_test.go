@@ -403,6 +403,10 @@ func TestLegacyColumnsStayInSync(t *testing.T) {
 		INSERT INTO inventory (id, store_id, product_variant_id, quantity_available, quantity_reserved)
 		VALUES (?, ?, ?, 5, 0)`, uuid.New(), f.storeID, productVariant).Error)
 	assert.Equal(t, Stock{OnHand: 5}, f.stock(t, productVariant), "an insert from the old backend fills the new columns")
+	var price float64
+	require.NoError(t, f.db.Raw(`SELECT price::float8 FROM inventory WHERE product_variant_id = ?`, productVariant).
+		Scan(&price).Error)
+	assert.InDelta(t, 10, price, 0.001, "an insert without a price starts at the product's default")
 }
 
 func TestUnlistedProductsKeepStockButRejectChanges(t *testing.T) {

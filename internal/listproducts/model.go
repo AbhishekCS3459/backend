@@ -97,7 +97,8 @@ type Listing struct {
 	SKU               string    `json:"sku"`
 	Category          string    `json:"category"`
 	ImageURL          string    `json:"image_url"`
-	Price             float64   `json:"price"`
+	Price             float64   `json:"price"`            // this store's selling price
+	PriceUpdatedAt    time.Time `json:"price_updated_at"` // when the store last set or confirmed it
 	OnHand            int       `json:"on_hand"`
 	Reserved          int       `json:"reserved"`
 	Available         int       `json:"available"`
@@ -122,14 +123,19 @@ type CatalogItem struct {
 	SKU       string    `json:"sku"`
 	Category  string    `json:"category"`
 	ImageURL  string    `json:"image_url"`
-	Price     float64   `json:"price"`
-	Listed    bool      `json:"listed"`
+	// Price is the retailer's default, the price a new listing starts at.
+	Price float64 `json:"price"`
+	// StorePrice is this store's price, set whenever the store has listed the
+	// product, including one it has since removed (re-adding keeps the price).
+	StorePrice *float64 `json:"store_price"`
+	Listed     bool     `json:"listed"`
 }
 
 type AddRequest struct {
 	VariantID uuid.UUID `json:"variant_id" validate:"required"`
-	// Price, when set, becomes the product's selling price. Prices belong to the
-	// retailer's product, so the change applies to every store that lists it.
+	// Price, when set, is this store's selling price; other stores keep theirs.
+	// Otherwise a new listing starts at the product's default price and a
+	// re-added one keeps the price it had.
 	Price *float64 `json:"price" validate:"omitnil,gt=0"`
 	// OpeningQuantity, when above zero, is recorded as a STOCK_RECEIVED
 	// inventory transaction in the same database transaction as the listing.
@@ -143,7 +149,7 @@ type CreateProductRequest struct {
 	Brand             string  `json:"brand" validate:"required,min=1,max=255"`
 	Category          string  `json:"category" validate:"required,min=1,max=255"`
 	SKU               string  `json:"sku" validate:"required,min=2,max=255"`
-	Price             float64 `json:"price" validate:"required,gt=0"`
+	Price             float64 `json:"price" validate:"required,gt=0"` // the default and this store's price
 	ImageURL          string  `json:"image_url"`
 	OpeningQuantity   int     `json:"opening_quantity" validate:"min=0,max=1000000"`
 	LowStockThreshold int     `json:"low_stock_threshold" validate:"min=0"`
@@ -155,6 +161,8 @@ type CreateProductRequest struct {
 type UpdateRequest struct {
 	LowStockThreshold *int  `json:"low_stock_threshold" validate:"omitnil,min=0"`
 	IsAvailable       *bool `json:"is_available"`
+	// Price is this store's selling price; other stores keep theirs.
+	Price *float64 `json:"price" validate:"omitnil,gt=0"`
 	// QuantityAvailable is accepted only to reject it with a pointer to the
 	// inventory API instead of silently ignoring it.
 	QuantityAvailable *int `json:"quantity_available"`

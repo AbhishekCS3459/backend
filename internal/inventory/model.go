@@ -180,12 +180,32 @@ type ListInput struct {
 	VariantID         uuid.UUID
 	LowStockThreshold int
 	IsAvailable       bool
+	// Price is this store's selling price. When nil, a new listing starts at
+	// the product's default price and a relisted one keeps its last price.
+	Price *float64
 }
 
 // Settings are listing options that do not change stock.
 type Settings struct {
 	LowStockThreshold *int
 	IsAvailable       *bool
+	Price             *float64 // this store's selling price
+}
+
+// maxPrice is the first value inventory.price, a DECIMAL(12, 2), can't hold.
+const maxPrice = 1e10
+
+// validPrice rejects prices the inventory.price column would.
+func validPrice(price *float64) error {
+	switch {
+	case price == nil:
+		return nil
+	case !(*price > 0):
+		return &ValidationError{Message: "price must be above zero"}
+	case *price >= maxPrice:
+		return &ValidationError{Message: "price is too large"}
+	}
+	return nil
 }
 
 // StockStatus is shared with listings so every screen classifies stock the same way.

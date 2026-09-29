@@ -137,3 +137,75 @@ func TestListingLifecycleGoesThroughLedger(t *testing.T) {
 	assert.Equal(t, 15, updated.OnHand, "settings never touch stock")
 	assert.Equal(t, "unavailable", updated.StockStatus)
 }
+
+func TestEachStoreSetsItsOwnPrice(t *testing.T) {
+	repo, db, userID, retailerID, storeA := newTestRepo(t)
+	ctx := context.Background()
+	suffix := userID.String()[:8]
+	storeB := uuid.New()
+	require.NoError(t, db.Exec(`INSERT INTO store (id, retailer_id, category_id, name, description)
+		SELECT ?, ?, id, 'Second Store', '' FROM category WHERE name = ?`, storeB, retailerID, "lp-test-"+suffix).Error)
+	t.Cleanup(func() {
+		_ = db.Exec(`DELETE FROM inventory_transaction WHERE store_id = ?`, storeB).Error
+		_ = db.Exec(`DELETE FROM inventory WHERE store_id = ?`, storeB).Error
+		_ = db.Exec(`DELETE FROM store WHERE id = ?`, storeB).Error
+	})
+	price := func(v float64) *float64 { return &v }
+
+	created, err := repo.CreateAndList(ctx, userID, retailerID, storeA, &CreateProductRequest{
+		Name: "Price Soap", Brand: "lp-brand-" + suffix, Category: "lp-test-" + suffix,
+		SKU: "LP-P-" + suffix, Price: 25,
+	})
+	require.NoError(t, err)
+	assert.InDelta(t, 25, created.Price, 0.001)
+	variant := created.VariantID
+
+	inB, err := repo.AddListing(ctx, userID, retailerID, storeB, &AddRequest{VariantID: variant}, true)
+	require.NoError(t, err)
+	assert.InDelta(t, 25, inB.Price, 0.001, "a new listing starts at the product's default price")
+	listedAt := inB.PriceUpdatedAt
+	assert.False(t, listedAt.IsZero())
+
+	threshold := 4
+	inB, err = repo.UpdateListing(ctx, storeB, variant, &UpdateRequest{LowStockThreshold: &threshold})
+	require.NoError(t, err)
+	assert.True(t, inB.PriceUpdatedAt.Equal(listedAt), "other settings leave the price date alone")
+
+	inB, err = repo.UpdateListing(ctx, storeB, variant, &UpdateRequest{Price: price(22.5)})
+	require.NoError(t, err)
+	assert.InDelta(t, 22.5, inB.Price, 0.001)
+	assert.True(t, inB.PriceUpdatedAt.After(listedAt))
+	pricedAt := inB.PriceUpdatedAt
+
+	inB, err = repo.UpdateListing(ctx, storeB, variant, &UpdateRequest{Price: price(22.5)})
+	require.NoError(t, err)
+	assert.True(t, inB.PriceUpdatedAt.After(pricedAt), "sending the same price again confirms it")
+	pricedAt = inB.PriceUpdatedAt
+	inA, err := repo.FindListing(ctx, storeA, variant)
+	require.NoError(t, err)
+	assert.InDelta(t, 25, inA.Price, 0.001, "another store's price change leaves this one alone")
+
+	catalog, err := repo.ListCatalog(ctx, retailerID, storeB, "Price Soap")
+	require.NoError(t, err)
+	require.Len(t, catalog, 1)
+	assert.InDelta(t, 25, catalog[0].Price, 0.001, "the default price is unchanged")
+	require.NotNil(t, catalog[0].StorePrice)
+	assert.InDelta(t, 22.5, *catalog[0].StorePrice, 0.001)
+
+	require.NoError(t, repo.RemoveListing(ctx, storeB, variant))
+	catalog, err = repo.ListCatalog(ctx, retailerID, storeB, "Price Soap")
+	require.NoError(t, err)
+	require.Len(t, catalog, 1)
+	assert.False(t, catalog[0].Listed)
+	require.NotNil(t, catalog[0].StorePrice, "a removed listing remembers its price")
+	relisted, err := repo.AddListing(ctx, userID, retailerID, storeB, &AddRequest{VariantID: variant}, true)
+	require.NoError(t, err)
+	assert.InDelta(t, 22.5, relisted.Price, 0.001, "re-adding keeps the store's last price")
+	assert.True(t, relisted.PriceUpdatedAt.Equal(pricedAt), "and when it was set, so an old price still looks old")
+
+	var invalid *inventory.ValidationError
+	_, err = repo.UpdateListing(ctx, storeB, variant, &UpdateRequest{Price: price(0)})
+	assert.ErrorAs(t, err, &invalid)
+	_, err = repo.UpdateListing(ctx, storeB, variant, &UpdateRequest{Price: price(1e10)})
+	assert.ErrorAs(t, err, &invalid)
+}

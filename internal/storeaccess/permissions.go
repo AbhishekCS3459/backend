@@ -62,7 +62,7 @@ var groups = []PermissionGroup{
 	{ID: "catalog", Label: "Catalogue & pricing", Permissions: []PermissionInfo{
 		{Key: CatalogView, Label: "View catalogue", Description: "Browse the store's products, variants and prices."},
 		{Key: CatalogManage, Label: "Manage products & pricing",
-			Description: "Add, edit or remove products, categories, brands, variants, images and prices.",
+			Description: "Add, edit or remove products, categories, brands, variants, images and this store's prices.",
 			Requires: []Permission{CatalogView}},
 	}},
 	{ID: "inventory", Label: "Inventory", Permissions: []PermissionInfo{

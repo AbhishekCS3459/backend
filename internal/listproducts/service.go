@@ -82,9 +82,18 @@ func (s *service) Create(ctx context.Context, userID, storeID uuid.UUID, req *Cr
 	return s.repo.CreateAndList(ctx, userID, retailerID, storeID, req)
 }
 
+// Update needs pricing permission to change the price and stock permission
+// for everything else, so a request changing both needs both.
 func (s *service) Update(ctx context.Context, userID, storeID, variantID uuid.UUID, req *UpdateRequest) (*Listing, error) {
-	if _, err := s.authorize(ctx, userID, storeID, storeaccess.InventoryUpdate); err != nil {
-		return nil, err
+	if req.Price != nil {
+		if _, err := s.authorize(ctx, userID, storeID, storeaccess.CatalogManage); err != nil {
+			return nil, err
+		}
+	}
+	if req.Price == nil || req.LowStockThreshold != nil || req.IsAvailable != nil {
+		if _, err := s.authorize(ctx, userID, storeID, storeaccess.InventoryUpdate); err != nil {
+			return nil, err
+		}
 	}
 	return s.repo.UpdateListing(ctx, storeID, variantID, req)
 }

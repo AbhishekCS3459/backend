@@ -165,7 +165,7 @@ func (f *fixture) row(t *testing.T, inventoryID uuid.UUID) availability.Row {
 	var rows []availability.Row
 	require.NoError(t, f.db.Raw(`
 		SELECT inventory_id, store_id, product_variant_id, location::text AS location, price::text AS price,
-			available_qty, availability_bucket, searchable, last_stock_update_at, version, updated_at
+			price_updated_at, available_qty, availability_bucket, searchable, last_stock_update_at, version, updated_at
 		FROM store_product_availability WHERE inventory_id = ?`, inventoryID).Scan(&rows).Error)
 	require.Len(t, rows, 1, "every store product has a search row")
 	return rows[0]
@@ -263,14 +263,21 @@ func TestEveryWritePathUpdatesTheSearchRow(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, f.row(t, id).Searchable)
 
-	// A price belongs to the retailer's product, so listing it in store B at a
-	// new price changes store A's row too.
+	// Each store sets its own price.
 	_, err = f.listings.AddListing(ctx, f.userID, f.retailerID, storeB, &listproducts.AddRequest{
 		VariantID: created.VariantID, Price: floatPtr(30), OpeningQuantity: 4,
 	}, true)
 	require.NoError(t, err)
-	assert.Equal(t, "30.00", f.row(t, id).Price)
 	idB := f.inventoryID(t, storeB, created.VariantID)
+	assert.Equal(t, "30.00", f.row(t, idB).Price)
+	unpriced := f.row(t, id)
+	assert.Equal(t, "25.00", unpriced.Price, "listing elsewhere at another price leaves this store's alone")
+	assert.True(t, unpriced.PriceUpdatedAt.Equal(created.PriceUpdatedAt), "stock changes leave the price date alone")
+	_, err = f.listings.UpdateListing(ctx, storeA, variant, &listproducts.UpdateRequest{Price: floatPtr(27.5)})
+	require.NoError(t, err)
+	repriced := f.row(t, id)
+	assert.Equal(t, "27.50", repriced.Price)
+	assert.True(t, repriced.PriceUpdatedAt.After(unpriced.PriceUpdatedAt), "a new price records when it was set")
 	assert.Equal(t, "30.00", f.row(t, idB).Price)
 	f.assertInSync(t)
 
@@ -327,6 +334,7 @@ func TestCustomersSeeOnlyTheBucketAndStaleStockNeedsConfirming(t *testing.T) {
 		SELECT column_name::text FROM information_schema.columns
 		WHERE table_name = 'store_product_search'`).Scan(&columns).Error)
 	assert.Contains(t, columns, "availability_bucket")
+	assert.Contains(t, columns, "price_updated_at")
 	assert.NotContains(t, columns, "available_qty", "customers never see the exact count")
 
 	bucket := func() string {
@@ -419,12 +427,9 @@ func TestConcurrentWritersLeaveNoDrift(t *testing.T) {
 		return err
 	})
 	run(10, func(i int) error {
-		return f.db.Transaction(func(tx *gorm.DB) error {
-			if err := tx.Exec(`UPDATE product_variant SET price = ? WHERE id = ?`, 10+i, first.VariantID).Error; err != nil {
-				return err
-			}
-			return availability.RefreshVariant(tx, first.VariantID)
-		})
+		price := float64(10 + i)
+		_, err := f.listings.UpdateListing(ctx, storeA, first.VariantID, &listproducts.UpdateRequest{Price: &price})
+		return err
 	})
 	run(10, func(i int) error {
 		_, err := f.stores.UpdateLocked(ctx, storeA, func(s *stores.Store) error {
@@ -443,8 +448,8 @@ func TestConcurrentWritersLeaveNoDrift(t *testing.T) {
 	inA, inB := f.row(t, first.InventoryID), f.row(t, f.inventoryID(t, storeB, first.VariantID))
 	assert.Equal(t, 90, inA.AvailableQty)
 	assert.Equal(t, 90, inB.AvailableQty)
-	assert.Equal(t, "19.00", inA.Price, "the last price change wins in every store")
-	assert.Equal(t, "19.00", inB.Price)
+	assert.Equal(t, "19.00", inA.Price, "the last price change wins")
+	assert.Equal(t, "10.00", inB.Price, "store A's prices never reach store B")
 	assert.True(t, inA.Searchable, "the last toggle reopened the store")
 }
 

@@ -56,6 +56,11 @@ func (r inventoryRow) item() Item {
 const rowColumns = `id, store_id, product_variant_id, on_hand_quantity, reserved_quantity,
 	low_stock_threshold, is_available, unlisted_at, updated_at`
 
+// setPrice sets the price when one is given (args: price, price, now). Giving
+// the current price again still confirms it, so price_updated_at moves too.
+const setPrice = `price = COALESCE(?::numeric, price),
+	price_updated_at = CASE WHEN ?::numeric IS NULL THEN price_updated_at ELSE ?::timestamptz END`
+
 func findRow(db *gorm.DB, storeID, variantID uuid.UUID, lock bool) (*inventoryRow, error) {
 	sql := `SELECT ` + rowColumns + ` FROM inventory WHERE store_id = ? AND product_variant_id = ?`
 	if lock {
@@ -87,6 +92,9 @@ func (Ledger) List(tx *gorm.DB, in ListInput) (Item, error) {
 	if in.LowStockThreshold < 0 {
 		return Item{}, &ValidationError{Message: "low stock threshold cannot be negative"}
 	}
+	if err := validPrice(in.Price); err != nil {
+		return Item{}, err
+	}
 	now := time.Now().UTC()
 	row, err := findRow(tx, in.StoreID, in.VariantID, true)
 	switch {
@@ -101,9 +109,11 @@ func (Ledger) List(tx *gorm.DB, in ListInput) (Item, error) {
 		}
 		err = tx.Exec(`
 			INSERT INTO inventory (id, store_id, product_variant_id, on_hand_quantity, reserved_quantity,
-				low_stock_threshold, is_available, listed_at, updated_at)
-			VALUES (?, ?, ?, 0, 0, ?, ?, ?, ?)`,
-			row.ID, row.StoreID, row.ProductVariantID, row.LowStockThreshold, row.IsAvailable, now, now).Error
+				low_stock_threshold, is_available, price, price_updated_at, listed_at, updated_at)
+			VALUES (?, ?, ?, 0, 0, ?, ?,
+				COALESCE(?::numeric, (SELECT price FROM product_variant WHERE id = ?)), ?, ?, ?)`,
+			row.ID, row.StoreID, row.ProductVariantID, row.LowStockThreshold, row.IsAvailable,
+			in.Price, row.ProductVariantID, now, now, now).Error
 		if isUniqueViolation(err, "inventory_store_variant_key") {
 			return Item{}, ErrAlreadyListed
 		}
@@ -121,8 +131,9 @@ func (Ledger) List(tx *gorm.DB, in ListInput) (Item, error) {
 	}
 	err = tx.Exec(`
 		UPDATE inventory
-		SET unlisted_at = NULL, listed_at = ?, low_stock_threshold = ?, is_available = ?, updated_at = ?
-		WHERE id = ?`, now, in.LowStockThreshold, in.IsAvailable, now, row.ID).Error
+		SET unlisted_at = NULL, listed_at = ?, low_stock_threshold = ?, is_available = ?,
+			`+setPrice+`, updated_at = ?
+		WHERE id = ?`, now, in.LowStockThreshold, in.IsAvailable, in.Price, in.Price, now, now, row.ID).Error
 	if err != nil {
 		return Item{}, fmt.Errorf("relist product: %w", err)
 	}
@@ -160,6 +171,9 @@ func (Ledger) UpdateSettings(tx *gorm.DB, storeID, variantID uuid.UUID, s Settin
 	if s.LowStockThreshold != nil && *s.LowStockThreshold < 0 {
 		return Item{}, &ValidationError{Message: "low stock threshold cannot be negative"}
 	}
+	if err := validPrice(s.Price); err != nil {
+		return Item{}, err
+	}
 	row, err := findRow(tx, storeID, variantID, true)
 	if err != nil {
 		return Item{}, err
@@ -174,8 +188,11 @@ func (Ledger) UpdateSettings(tx *gorm.DB, storeID, variantID uuid.UUID, s Settin
 		row.IsAvailable = *s.IsAvailable
 	}
 	row.UpdatedAt = time.Now().UTC()
-	err = tx.Exec(`UPDATE inventory SET low_stock_threshold = ?, is_available = ?, updated_at = ? WHERE id = ?`,
-		row.LowStockThreshold, row.IsAvailable, row.UpdatedAt, row.ID).Error
+	err = tx.Exec(`
+		UPDATE inventory
+		SET low_stock_threshold = ?, is_available = ?, `+setPrice+`, updated_at = ?
+		WHERE id = ?`, row.LowStockThreshold, row.IsAvailable, s.Price, s.Price, row.UpdatedAt, row.UpdatedAt,
+		row.ID).Error
 	if err != nil {
 		return Item{}, fmt.Errorf("update listing settings: %w", err)
 	}

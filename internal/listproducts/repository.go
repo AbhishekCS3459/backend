@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/AbhishekCS3459/find-me-backend/internal/availability"
 	"github.com/AbhishekCS3459/find-me-backend/internal/inventory"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -62,7 +61,8 @@ const listingSelect = `
 			ORDER BY pi.sort_order ASC
 			LIMIT 1
 		), '') AS image_url,
-		v.price::float8 AS price,
+		i.price::float8 AS price,
+		i.price_updated_at,
 		i.on_hand_quantity AS on_hand,
 		i.reserved_quantity AS reserved,
 		i.on_hand_quantity - i.reserved_quantity AS available,
@@ -143,12 +143,11 @@ func (r *repository) ListCatalog(ctx context.Context, retailerID, storeID uuid.U
 				LIMIT 1
 			), '') AS image_url,
 			v.price::float8 AS price,
-			EXISTS (
-				SELECT 1 FROM inventory i
-				WHERE i.store_id = ? AND i.product_variant_id = v.id AND i.unlisted_at IS NULL
-			) AS listed
+			i.price::float8 AS store_price,
+			i.id IS NOT NULL AND i.unlisted_at IS NULL AS listed
 		FROM product p
 		JOIN product_variant v ON v.product_id = p.id
+		LEFT JOIN inventory i ON i.store_id = ? AND i.product_variant_id = v.id
 		LEFT JOIN brand b ON b.id = p.brand_id
 		LEFT JOIN category c ON c.id = p.category_id
 		WHERE p.retailer_id = ?
@@ -183,15 +182,10 @@ func (r *repository) AddListing(
 		if owned == 0 {
 			return ErrVariantNotFound
 		}
-		if req.Price != nil {
-			if err := tx.Model(&Variant{}).Where("id = ?", req.VariantID).Update("price", *req.Price).Error; err != nil {
-				return fmt.Errorf("update price: %w", err)
-			}
-			if err := availability.RefreshVariant(tx, req.VariantID); err != nil {
-				return err
-			}
-		}
-		return r.listWithOpeningStock(tx, actorID, storeID, req.VariantID, req.OpeningQuantity, req.LowStockThreshold, available)
+		return r.listWithOpeningStock(tx, actorID, inventory.ListInput{
+			StoreID: storeID, VariantID: req.VariantID, LowStockThreshold: req.LowStockThreshold,
+			IsAvailable: available, Price: req.Price,
+		}, req.OpeningQuantity)
 	})
 	if err != nil {
 		return nil, err
@@ -258,7 +252,10 @@ func (r *repository) CreateAndList(
 			return err
 		}
 		variantID = variant.ID
-		return r.listWithOpeningStock(tx, actorID, storeID, variant.ID, req.OpeningQuantity, req.LowStockThreshold, available)
+		return r.listWithOpeningStock(tx, actorID, inventory.ListInput{
+			StoreID: storeID, VariantID: variant.ID, LowStockThreshold: req.LowStockThreshold,
+			IsAvailable: available, Price: &req.Price,
+		}, req.OpeningQuantity)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create product listing: %w", err)
@@ -268,13 +265,8 @@ func (r *repository) CreateAndList(
 
 // listWithOpeningStock lists (or relists) a product and records any opening
 // quantity as received stock, inside the caller's transaction.
-func (r *repository) listWithOpeningStock(
-	tx *gorm.DB, actorID, storeID, variantID uuid.UUID, opening, threshold int, available bool,
-) error {
-	_, err := r.ledger.List(tx, inventory.ListInput{
-		StoreID: storeID, VariantID: variantID, LowStockThreshold: threshold, IsAvailable: available,
-	})
-	if err != nil || opening == 0 {
+func (r *repository) listWithOpeningStock(tx *gorm.DB, actorID uuid.UUID, in inventory.ListInput, opening int) error {
+	if _, err := r.ledger.List(tx, in); err != nil || opening == 0 {
 		return err
 	}
 	actor, err := inventory.ResolveActor(tx, actorID)
@@ -282,7 +274,7 @@ func (r *repository) listWithOpeningStock(
 		return err
 	}
 	_, err = r.ledger.Receive(tx, inventory.ReceiveInput{
-		StoreID: storeID, VariantID: variantID, Quantity: opening, Note: openingStockNote, Actor: actor,
+		StoreID: in.StoreID, VariantID: in.VariantID, Quantity: opening, Note: openingStockNote, Actor: actor,
 	})
 	return err
 }
@@ -311,6 +303,7 @@ func (r *repository) UpdateListing(ctx context.Context, storeID, variantID uuid.
 		_, err := r.ledger.UpdateSettings(tx, storeID, variantID, inventory.Settings{
 			LowStockThreshold: req.LowStockThreshold,
 			IsAvailable:       req.IsAvailable,
+			Price:             req.Price,
 		})
 		return err
 	})

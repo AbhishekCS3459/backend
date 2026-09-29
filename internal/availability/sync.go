@@ -153,6 +153,7 @@ func differingFields(want, got Row) []string {
 	check("product_variant_id", want.VariantID == got.VariantID)
 	check("location", equalPtr(want.Location, got.Location))
 	check("price", want.Price == got.Price)
+	check("price_updated_at", want.PriceUpdatedAt.Equal(got.PriceUpdatedAt))
 	check("available_qty", want.AvailableQty == got.AvailableQty)
 	check("availability_bucket", want.Bucket == got.Bucket)
 	check("searchable", want.Searchable == got.Searchable)

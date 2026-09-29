@@ -27,6 +27,7 @@ type Row struct {
 	// Location is the geography as PostgreSQL prints it (hex EWKB).
 	Location          *string   `json:"-"`
 	Price             string    `json:"price"`
+	PriceUpdatedAt    time.Time `json:"price_updated_at"`
 	AvailableQty      int       `json:"available_qty"`
 	Bucket            Bucket    `json:"availability_bucket" gorm:"column:availability_bucket"`
 	Searchable        bool      `json:"searchable"`
@@ -51,11 +52,6 @@ func RefreshInventory(tx *gorm.DB, inventoryID uuid.UUID) error {
 // RefreshStore rebuilds every row of a store, after its visibility or location changes.
 func RefreshStore(tx *gorm.DB, storeID uuid.UUID) error {
 	return refresh(tx, "store_id = ?", storeID)
-}
-
-// RefreshVariant rebuilds the variant's row in every store, after its price changes.
-func RefreshVariant(tx *gorm.DB, variantID uuid.UUID) error {
-	return refresh(tx, "product_variant_id = ?", variantID)
 }
 
 // refreshBatch keeps each upsert well under PostgreSQL's 65535 parameter limit.
@@ -134,19 +130,21 @@ type source struct {
 	StoreDeleted      bool
 	Location          *string
 	Price             string
+	PriceUpdatedAt    time.Time
 	LastStockUpdateAt time.Time
 }
 
 func (s source) row() Row {
 	available := max(s.OnHandQuantity-s.ReservedQuantity, 0)
 	return Row{
-		InventoryID:  s.InventoryID,
-		StoreID:      s.StoreID,
-		VariantID:    s.ProductVariantID,
-		Location:     s.Location,
-		Price:        s.Price,
-		AvailableQty: available,
-		Bucket:       BucketFor(available, s.LowStockThreshold),
+		InventoryID:    s.InventoryID,
+		StoreID:        s.StoreID,
+		VariantID:      s.ProductVariantID,
+		Location:       s.Location,
+		Price:          s.Price,
+		PriceUpdatedAt: s.PriceUpdatedAt,
+		AvailableQty:   available,
+		Bucket:         BucketFor(available, s.LowStockThreshold),
 		// Search is by distance, so a store without a saved location can't be found.
 		Searchable: s.Listed && s.IsAvailable && s.Location != nil &&
 			StoreSearchable(s.StoreStatus, s.StoreIsOpen, s.OnboardingStatus, s.StoreDeleted),
@@ -167,11 +165,10 @@ func expectedRows(db *gorm.DB, ids []uuid.UUID) ([]Row, error) {
 			s.status AS store_status, s.is_open AS store_is_open, s.onboarding_status,
 			s.deleted_at IS NOT NULL AS store_deleted,
 			l.geog::text AS location,
-			v.price::text AS price,
+			i.price::text AS price, i.price_updated_at,
 			COALESCE(t.created_at, i.listed_at) AS last_stock_update_at
 		FROM inventory i
 		JOIN store s ON s.id = i.store_id
-		JOIN product_variant v ON v.id = i.product_variant_id
 		LEFT JOIN store_location l ON l.store_id = i.store_id
 		LEFT JOIN LATERAL (
 			SELECT created_at FROM inventory_transaction
@@ -192,7 +189,7 @@ func expectedRows(db *gorm.DB, ids []uuid.UUID) ([]Row, error) {
 }
 
 const rowColumns = `inventory_id, store_id, product_variant_id, location::text AS location,
-	price::text AS price, available_qty, availability_bucket, searchable,
+	price::text AS price, price_updated_at, available_qty, availability_bucket, searchable,
 	last_stock_update_at, version, updated_at`
 
 func storedRows(db *gorm.DB, ids []uuid.UUID) (map[uuid.UUID]Row, error) {
@@ -216,16 +213,16 @@ func upsert(tx *gorm.DB, rows []Row) ([]Row, error) {
 		return nil, nil
 	}
 	values := make([]string, len(rows))
-	args := make([]any, 0, len(rows)*9)
+	args := make([]any, 0, len(rows)*10)
 	for i, r := range rows {
-		values[i] = "(?, ?, ?, ?::geography, ?::numeric, ?, ?, ?, ?)"
-		args = append(args, r.InventoryID, r.StoreID, r.VariantID, r.Location, r.Price,
+		values[i] = "(?, ?, ?, ?::geography, ?::numeric, ?::timestamptz, ?, ?, ?, ?)"
+		args = append(args, r.InventoryID, r.StoreID, r.VariantID, r.Location, r.Price, r.PriceUpdatedAt,
 			r.AvailableQty, string(r.Bucket), r.Searchable, r.LastStockUpdateAt)
 	}
 	var changed []Row
 	err := tx.Raw(`
 		INSERT INTO store_product_availability AS a (
-			inventory_id, store_id, product_variant_id, location, price, available_qty,
+			inventory_id, store_id, product_variant_id, location, price, price_updated_at, available_qty,
 			availability_bucket, searchable, last_stock_update_at
 		) VALUES `+strings.Join(values, ", ")+`
 		ON CONFLICT (inventory_id) DO UPDATE SET
@@ -233,6 +230,7 @@ func upsert(tx *gorm.DB, rows []Row) ([]Row, error) {
 			product_variant_id = EXCLUDED.product_variant_id,
 			location = EXCLUDED.location,
 			price = EXCLUDED.price,
+			price_updated_at = EXCLUDED.price_updated_at,
 			available_qty = EXCLUDED.available_qty,
 			availability_bucket = EXCLUDED.availability_bucket,
 			searchable = EXCLUDED.searchable,
@@ -243,6 +241,7 @@ func upsert(tx *gorm.DB, rows []Row) ([]Row, error) {
 			OR a.product_variant_id IS DISTINCT FROM EXCLUDED.product_variant_id
 			OR a.location::text IS DISTINCT FROM EXCLUDED.location::text
 			OR a.price IS DISTINCT FROM EXCLUDED.price
+			OR a.price_updated_at IS DISTINCT FROM EXCLUDED.price_updated_at
 			OR a.available_qty IS DISTINCT FROM EXCLUDED.available_qty
 			OR a.availability_bucket IS DISTINCT FROM EXCLUDED.availability_bucket
 			OR a.searchable IS DISTINCT FROM EXCLUDED.searchable
