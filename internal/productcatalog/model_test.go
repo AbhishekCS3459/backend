@@ -132,6 +132,21 @@ func TestSKUProductID(t *testing.T) {
 	}
 }
 
+func TestCatalogKey(t *testing.T) {
+	if got := CatalogKey("776963"); got != "todayz:776963" {
+		t.Errorf("CatalogKey = %q, want todayz:776963", got)
+	}
+	if id, ok := CatalogKeyProductID("todayz:776963"); !ok || id != "776963" {
+		t.Errorf("CatalogKeyProductID(todayz:776963) = %q, %v", id, ok)
+	}
+	for _, bad := range []string{"blinkit:776963", "todayz:", "todayz:abc", "variant:776963", "776963",
+		"todayz:" + strings.Repeat("9", 21)} {
+		if _, ok := CatalogKeyProductID(bad); ok {
+			t.Errorf("CatalogKeyProductID(%q) should not match", bad)
+		}
+	}
+}
+
 func TestNormalizeFilters(t *testing.T) {
 	got, err := normalizeFilters(Filters{Group: " Snacks & Drinks ", Brand: " Lay's "})
 	if err != nil {

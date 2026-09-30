@@ -12,6 +12,7 @@ type Service interface {
 	FilterOptions(ctx context.Context, filters Filters) (FilterOptions, error)
 	Search(ctx context.Context, params SearchParams) (SearchResult, error)
 	Autocomplete(ctx context.Context, query string, limit int, filters Filters) ([]Suggestion, error)
+	ExistingProductIDs(ctx context.Context, ids []string) (map[string]bool, error)
 }
 
 type service struct {
@@ -97,6 +98,14 @@ func (s *service) Autocomplete(ctx context.Context, query string, limit int, fil
 		return []Suggestion{}, nil
 	}
 	return s.repo.Autocomplete(ctx, query, clampLimit(limit, DefaultSuggestions, MaxSuggestions), filters)
+}
+
+// ExistingProductIDs returns which of ids are catalogue product ids.
+func (s *service) ExistingProductIDs(ctx context.Context, ids []string) (map[string]bool, error) {
+	if s.repo == nil {
+		return nil, ErrUnavailable
+	}
+	return s.repo.ExistingProductIDs(ctx, ids)
 }
 
 func clampLimit(limit, fallback, max int) int {

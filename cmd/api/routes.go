@@ -83,20 +83,21 @@ func SetupRoutes(db *database.DB, mongoClient *mongodb.Client, cfg *Config) *chi
 	categoryHandler := catalog.NewHandler(catalog.NewService(catalog.NewRepository(db.Gorm)))
 	storeAccess := storeaccess.NewResolver(db.Gorm)
 	storeHandler := stores.NewHandler(stores.NewService(stores.NewRepository(db.Gorm), retailerRepo, storeAccess))
-	inventoryLedger := inventory.NewLedger()
-	inventoryHandler := inventory.NewHandler(inventory.NewService(db.Gorm, storeAccess, inventoryLedger))
-	listProductsService := listproducts.NewService(listproducts.NewRepository(db.Gorm, inventoryLedger), storeAccess)
-	listProductsHandler := listproducts.NewHandler(listProductsService)
-	teamHandler := team.NewHandler(team.NewService(team.NewRepository(db.Gorm), storeAccess))
-	truecallerHandler := truecaller.NewHandler(truecaller.NewService(truecaller.NewStore(cfg.RedisURL), userService))
-
 	var catalogCollection *mongo.Collection
 	if mongoClient != nil {
 		catalogCollection = mongoClient.Database(cfg.MongoCatalogDatabase).Collection(cfg.MongoCatalogCollection)
 	}
-	productCatalogHandler := productcatalog.NewHandler(
-		productcatalog.NewService(productcatalog.NewRepository(catalogCollection)),
+	productCatalogService := productcatalog.NewService(productcatalog.NewRepository(catalogCollection))
+	productCatalogHandler := productcatalog.NewHandler(productCatalogService)
+
+	inventoryLedger := inventory.NewLedger()
+	inventoryHandler := inventory.NewHandler(inventory.NewService(db.Gorm, storeAccess, inventoryLedger))
+	listProductsService := listproducts.NewService(
+		listproducts.NewRepository(db.Gorm, inventoryLedger), storeAccess, productCatalogService,
 	)
+	listProductsHandler := listproducts.NewHandler(listProductsService)
+	teamHandler := team.NewHandler(team.NewService(team.NewRepository(db.Gorm), storeAccess))
+	truecallerHandler := truecaller.NewHandler(truecaller.NewService(truecaller.NewStore(cfg.RedisURL), userService))
 
 	// API Routes
 	// Note: API versioning structure ready for expansion

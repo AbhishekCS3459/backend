@@ -14,7 +14,7 @@ const (
 	AggregateType         = "store_product"
 	EventInventoryChanged = "InventoryChanged"
 	// InventoryChangedSchemaVersion changes when the payload changes shape.
-	InventoryChangedSchemaVersion = 1
+	InventoryChangedSchemaVersion = 2
 )
 
 // Row is one row of store_product_availability and the body of its
@@ -24,6 +24,9 @@ type Row struct {
 	InventoryID uuid.UUID `json:"inventory_id"`
 	StoreID     uuid.UUID `json:"store_id"`
 	VariantID   uuid.UUID `json:"product_variant_id" gorm:"column:product_variant_id"`
+	// CatalogKey groups the same catalogue product across retailers. A product
+	// created by hand has "variant:<id>", a group of its own.
+	CatalogKey string `json:"catalog_key"`
 	// Location is the geography as PostgreSQL prints it (hex EWKB).
 	Location          *string   `json:"-"`
 	Price             string    `json:"price"`
@@ -52,6 +55,14 @@ func RefreshInventory(tx *gorm.DB, inventoryID uuid.UUID) error {
 // RefreshStore rebuilds every row of a store, after its visibility or location changes.
 func RefreshStore(tx *gorm.DB, storeID uuid.UUID) error {
 	return refresh(tx, "store_id = ?", storeID)
+}
+
+// RefreshVariants rebuilds every store's row for the variants, after their catalogue key changes.
+func RefreshVariants(tx *gorm.DB, variantIDs []uuid.UUID) error {
+	if len(variantIDs) == 0 {
+		return nil
+	}
+	return refresh(tx, "product_variant_id IN ?", variantIDs)
 }
 
 // refreshBatch keeps each upsert well under PostgreSQL's 65535 parameter limit.
@@ -119,6 +130,7 @@ type source struct {
 	InventoryID       uuid.UUID
 	StoreID           uuid.UUID
 	ProductVariantID  uuid.UUID
+	CatalogKey        string
 	OnHandQuantity    int
 	ReservedQuantity  int
 	LowStockThreshold int
@@ -140,6 +152,7 @@ func (s source) row() Row {
 		InventoryID:    s.InventoryID,
 		StoreID:        s.StoreID,
 		VariantID:      s.ProductVariantID,
+		CatalogKey:     s.CatalogKey,
 		Location:       s.Location,
 		Price:          s.Price,
 		PriceUpdatedAt: s.PriceUpdatedAt,
@@ -160,6 +173,7 @@ func expectedRows(db *gorm.DB, ids []uuid.UUID) ([]Row, error) {
 	var sources []source
 	err := db.Raw(`
 		SELECT i.id AS inventory_id, i.store_id, i.product_variant_id,
+			COALESCE(v.catalog_key, 'variant:' || v.id::text) AS catalog_key,
 			i.on_hand_quantity, i.reserved_quantity, i.low_stock_threshold, i.is_available,
 			i.unlisted_at IS NULL AS listed,
 			s.status AS store_status, s.is_open AS store_is_open, s.onboarding_status,
@@ -168,6 +182,7 @@ func expectedRows(db *gorm.DB, ids []uuid.UUID) ([]Row, error) {
 			i.price::text AS price, i.price_updated_at,
 			COALESCE(t.created_at, i.listed_at) AS last_stock_update_at
 		FROM inventory i
+		JOIN product_variant v ON v.id = i.product_variant_id
 		JOIN store s ON s.id = i.store_id
 		LEFT JOIN store_location l ON l.store_id = i.store_id
 		LEFT JOIN LATERAL (
@@ -188,7 +203,7 @@ func expectedRows(db *gorm.DB, ids []uuid.UUID) ([]Row, error) {
 	return rows, nil
 }
 
-const rowColumns = `inventory_id, store_id, product_variant_id, location::text AS location,
+const rowColumns = `inventory_id, store_id, product_variant_id, catalog_key, location::text AS location,
 	price::text AS price, price_updated_at, available_qty, availability_bucket, searchable,
 	last_stock_update_at, version, updated_at`
 
@@ -213,21 +228,22 @@ func upsert(tx *gorm.DB, rows []Row) ([]Row, error) {
 		return nil, nil
 	}
 	values := make([]string, len(rows))
-	args := make([]any, 0, len(rows)*10)
+	args := make([]any, 0, len(rows)*11)
 	for i, r := range rows {
-		values[i] = "(?, ?, ?, ?::geography, ?::numeric, ?::timestamptz, ?, ?, ?, ?)"
-		args = append(args, r.InventoryID, r.StoreID, r.VariantID, r.Location, r.Price, r.PriceUpdatedAt,
-			r.AvailableQty, string(r.Bucket), r.Searchable, r.LastStockUpdateAt)
+		values[i] = "(?, ?, ?, ?, ?::geography, ?::numeric, ?::timestamptz, ?, ?, ?, ?)"
+		args = append(args, r.InventoryID, r.StoreID, r.VariantID, r.CatalogKey, r.Location, r.Price,
+			r.PriceUpdatedAt, r.AvailableQty, string(r.Bucket), r.Searchable, r.LastStockUpdateAt)
 	}
 	var changed []Row
 	err := tx.Raw(`
 		INSERT INTO store_product_availability AS a (
-			inventory_id, store_id, product_variant_id, location, price, price_updated_at, available_qty,
-			availability_bucket, searchable, last_stock_update_at
+			inventory_id, store_id, product_variant_id, catalog_key, location, price, price_updated_at,
+			available_qty, availability_bucket, searchable, last_stock_update_at
 		) VALUES `+strings.Join(values, ", ")+`
 		ON CONFLICT (inventory_id) DO UPDATE SET
 			store_id = EXCLUDED.store_id,
 			product_variant_id = EXCLUDED.product_variant_id,
+			catalog_key = EXCLUDED.catalog_key,
 			location = EXCLUDED.location,
 			price = EXCLUDED.price,
 			price_updated_at = EXCLUDED.price_updated_at,
@@ -239,6 +255,7 @@ func upsert(tx *gorm.DB, rows []Row) ([]Row, error) {
 			updated_at = NOW()
 		WHERE a.store_id IS DISTINCT FROM EXCLUDED.store_id
 			OR a.product_variant_id IS DISTINCT FROM EXCLUDED.product_variant_id
+			OR a.catalog_key IS DISTINCT FROM EXCLUDED.catalog_key
 			OR a.location::text IS DISTINCT FROM EXCLUDED.location::text
 			OR a.price IS DISTINCT FROM EXCLUDED.price
 			OR a.price_updated_at IS DISTINCT FROM EXCLUDED.price_updated_at

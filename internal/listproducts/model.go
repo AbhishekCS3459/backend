@@ -61,6 +61,7 @@ type Variant struct {
 	VariantLabel string    `json:"variant_label"`
 	SKU          string    `json:"sku"`
 	Price        float64   `json:"price"`
+	CatalogKey   *string   `json:"catalog_key,omitempty"`
 }
 
 func (Variant) TableName() string { return "product_variant" }
@@ -154,6 +155,10 @@ type CreateProductRequest struct {
 	OpeningQuantity   int     `json:"opening_quantity" validate:"min=0,max=1000000"`
 	LowStockThreshold int     `json:"low_stock_threshold" validate:"min=0"`
 	IsAvailable       *bool   `json:"is_available"`
+	// CatalogProductID is the catalogue product this was added from (its
+	// product_id). It must exist in the catalogue, and it groups this product
+	// with other retailers' in customer search. Empty for a product made by hand.
+	CatalogProductID string `json:"catalog_product_id" validate:"omitempty,max=20"`
 }
 
 // UpdateRequest changes listing settings only. Stock changes go through the

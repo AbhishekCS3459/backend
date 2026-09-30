@@ -158,6 +158,8 @@ func (h *Handler) writeErr(w http.ResponseWriter, err error, userID, msg string)
 	status, message := MapError(err)
 	if status >= 500 {
 		log.Error().Err(err).Str("user_id", userID).Msg(msg)
+	}
+	if status == http.StatusInternalServerError {
 		message = msg
 	}
 	httputil.WriteError(w, status, message)

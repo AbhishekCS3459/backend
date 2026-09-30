@@ -40,6 +40,7 @@ type Repository interface {
 	FilterOptions(ctx context.Context, filters Filters) (FilterOptions, error)
 	Search(ctx context.Context, params SearchParams) (SearchResult, error)
 	Autocomplete(ctx context.Context, query string, limit int, filters Filters) ([]Suggestion, error)
+	ExistingProductIDs(ctx context.Context, ids []string) (map[string]bool, error)
 }
 
 type repository struct {
@@ -259,6 +260,27 @@ func (r *repository) Get(ctx context.Context, id string) (Product, error) {
 	}
 	p.finish()
 	return p, nil
+}
+
+// ExistingProductIDs returns which of ids are in the catalogue. A product is
+// stored once per locality, so it is matched by productId, not _id.
+func (r *repository) ExistingProductIDs(ctx context.Context, ids []string) (map[string]bool, error) {
+	found := make(map[string]bool, len(ids))
+	if len(ids) == 0 {
+		return found, nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
+	defer cancel()
+	var existing []string
+	err := r.col.Distinct(ctx, "productId", bson.D{{Key: "productId", Value: bson.D{{Key: "$in", Value: ids}}}}).
+		Decode(&existing)
+	if err != nil {
+		return nil, classify(err)
+	}
+	for _, id := range existing {
+		found[id] = true
+	}
+	return found, nil
 }
 
 func (r *repository) estimatedTotal(ctx context.Context) int64 {

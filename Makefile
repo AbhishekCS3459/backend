@@ -1,4 +1,4 @@
-.PHONY: help swagger swagger-serve build run run-prod run-dev dev stop lint lint-fix fmt vet test test-coverage test-utils bench-utils test-setup check migrate-up migrate-down migrate-create migrate-status docker-up docker-down docker-build monitoring-up monitoring-down clean catalog-indexes catalog-cleanup-preview catalog-prepare availability-check availability-backfill
+.PHONY: help swagger swagger-serve build run run-prod run-dev dev stop lint lint-fix fmt vet test test-coverage test-utils bench-utils test-setup check migrate-up migrate-down migrate-create migrate-status docker-up docker-down docker-build monitoring-up monitoring-down clean catalog-indexes catalog-cleanup-preview catalog-prepare availability-check availability-backfill catalog-key-check catalog-key-repair
 
 # Local development database 
 DEV_DATABASE_URL=postgresql://postgres:postgres@localhost:5434/find_me?sslmode=disable
@@ -44,6 +44,8 @@ help:
 	@echo "  make catalog-indexes  - Create the MongoDB catalogue indexes and the product_search Atlas Search index"
 	@echo "  make availability-check    - Report customer search rows that don't match inventory (exits 1 on drift)"
 	@echo "  make availability-backfill - Build or repair the customer search table from inventory"
+	@echo "  make catalog-key-check     - Report catalogue keys naming products missing from the catalogue (exits 1 if any)"
+	@echo "  make catalog-key-repair    - Clear those keys and refresh their search rows"
 
 # Generate Swagger docs from code annotations
 swagger:
@@ -100,6 +102,16 @@ availability-check:
 # while the API is serving; only rows that differ are written.
 availability-backfill:
 	@go run ./cmd/availability-sync -apply
+
+# Report catalogue keys (todayz:<productId>) naming products that aren't in the
+# MongoDB catalogue (exits 1 if any)
+catalog-key-check:
+	@go run ./cmd/catalog-key-check
+
+# Clear those keys so each product forms its own search group; its search rows
+# are refreshed in the same transaction. Safe while the API is serving.
+catalog-key-repair:
+	@go run ./cmd/catalog-key-check -apply
 
 # Run the application locally against the production database
 run-prod:

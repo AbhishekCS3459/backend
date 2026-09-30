@@ -2,6 +2,7 @@ package listproducts
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -76,7 +77,7 @@ func TestListingLifecycleGoesThroughLedger(t *testing.T) {
 	created, err := repo.CreateAndList(ctx, userID, retailerID, storeID, &CreateProductRequest{
 		Name: "Ledger Soap", Brand: "lp-brand-" + suffix, Category: "lp-test-" + suffix,
 		SKU: "LP-" + suffix, Price: 25, OpeningQuantity: 12, LowStockThreshold: 3,
-	})
+	}, nil)
 	require.NoError(t, err)
 	assert.Equal(t, 12, created.OnHand)
 	assert.Equal(t, 0, created.Reserved)
@@ -138,6 +139,46 @@ func TestListingLifecycleGoesThroughLedger(t *testing.T) {
 	assert.Equal(t, "unavailable", updated.StockStatus)
 }
 
+func TestACatalogueProductIsOwnedOncePerRetailer(t *testing.T) {
+	repo, db, userID, retailerID, storeID := newTestRepo(t)
+	other, _, otherUser, otherRetailer, otherStore := newTestRepo(t)
+	ctx := context.Background()
+	suffix := userID.String()[:8]
+	key := fmt.Sprintf("todayz:%d", time.Now().UnixNano())
+	create := func(r Repository, user, retailer, store uuid.UUID, sku string, catalogKey *string) (*Listing, error) {
+		return r.CreateAndList(ctx, user, retailer, store, &CreateProductRequest{
+			Name: "Cola 500 ml", Brand: "lp-brand-" + suffix, Category: "lp-test-" + suffix, SKU: sku, Price: 40,
+		}, catalogKey)
+	}
+	storedKey := func(variantID uuid.UUID) *string {
+		var rows []struct{ CatalogKey *string }
+		require.NoError(t, db.Raw(`SELECT catalog_key FROM product_variant WHERE id = ?`, variantID).Scan(&rows).Error)
+		require.Len(t, rows, 1)
+		return rows[0].CatalogKey
+	}
+
+	created, err := create(repo, userID, retailerID, storeID, "LP-C-"+suffix, &key)
+	require.NoError(t, err)
+	require.NotNil(t, storedKey(created.VariantID))
+	assert.Equal(t, key, *storedKey(created.VariantID))
+
+	_, err = create(repo, userID, retailerID, storeID, "LP-C2-"+suffix, &key)
+	assert.ErrorIs(t, err, ErrCatalogProductTaken, "a different SKU doesn't make it a different product")
+
+	theirs, err := create(other, otherUser, otherRetailer, otherStore, "LP-C-"+suffix, &key)
+	require.NoError(t, err, "another retailer can stock the same catalogue product")
+	assert.Equal(t, key, *storedKey(theirs.VariantID))
+
+	handMade, err := create(repo, userID, retailerID, storeID, "LP-H-"+suffix, nil)
+	require.NoError(t, err)
+	assert.Nil(t, storedKey(handMade.VariantID), "a product made by hand has no key")
+
+	reserved := "variant:" + uuid.NewString()
+	_, err = create(repo, userID, retailerID, storeID, "LP-R-"+suffix, &reserved)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "product_variant_catalog_key_format", "variant: keys belong to the search table")
+}
+
 func TestEachStoreSetsItsOwnPrice(t *testing.T) {
 	repo, db, userID, retailerID, storeA := newTestRepo(t)
 	ctx := context.Background()
@@ -155,7 +196,7 @@ func TestEachStoreSetsItsOwnPrice(t *testing.T) {
 	created, err := repo.CreateAndList(ctx, userID, retailerID, storeA, &CreateProductRequest{
 		Name: "Price Soap", Brand: "lp-brand-" + suffix, Category: "lp-test-" + suffix,
 		SKU: "LP-P-" + suffix, Price: 25,
-	})
+	}, nil)
 	require.NoError(t, err)
 	assert.InDelta(t, 25, created.Price, 0.001)
 	variant := created.VariantID

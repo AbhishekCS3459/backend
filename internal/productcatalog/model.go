@@ -81,13 +81,34 @@ func productSKU(productID, id string) string {
 	return skuPrefix + productID
 }
 
+// CatalogKeySource namespaces catalogue keys. Like the Todayz SKU, the key never
+// names the platform a product was scraped from.
+const CatalogKeySource = "todayz"
+
+// CatalogKey is product_variant.catalog_key for a catalogue product id: the
+// key that groups every retailer's variant of the product in search.
+func CatalogKey(productID string) string {
+	return CatalogKeySource + ":" + productID
+}
+
+// CatalogKeyProductID returns the product id in a key made by CatalogKey.
+func CatalogKeyProductID(key string) (string, bool) {
+	id, ok := strings.CutPrefix(key, CatalogKeySource+":")
+	return id, ok && ValidProductID(id)
+}
+
+// ValidProductID reports whether id has the shape of a catalogue product id.
+func ValidProductID(id string) bool {
+	return len(id) <= maxProductIDLen && allDigits(id)
+}
+
 // skuProductID returns the product id inside a Todayz SKU such as "TDZ-776963".
 func skuProductID(query string) (string, bool) {
 	if len(query) <= len(skuPrefix) || !strings.EqualFold(query[:len(skuPrefix)], skuPrefix) {
 		return "", false
 	}
 	id := query[len(skuPrefix):]
-	return id, len(id) <= maxProductIDLen && allDigits(id)
+	return id, ValidProductID(id)
 }
 
 // ListParams selects one page of the catalogue, ordered by _id.

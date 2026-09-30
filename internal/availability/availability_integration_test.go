@@ -149,13 +149,21 @@ func (f *fixture) createProduct(
 	t *testing.T, storeID uuid.UUID, price float64, opening, threshold int,
 ) *listproducts.Listing {
 	t.Helper()
+	return f.createKeyedProduct(t, storeID, nil, price, opening, threshold)
+}
+
+// createKeyedProduct is createProduct for a product added from the catalogue under catalogKey.
+func (f *fixture) createKeyedProduct(
+	t *testing.T, storeID uuid.UUID, catalogKey *string, price float64, opening, threshold int,
+) *listproducts.Listing {
+	t.Helper()
 	f.sku++
 	listing, err := f.listings.CreateAndList(context.Background(), f.userID, f.retailerID, storeID,
 		&listproducts.CreateProductRequest{
 			Name: "Availability Soap", Brand: f.brand(), Category: f.category(),
 			SKU: fmt.Sprintf("AV-%s-%d", f.suffix, f.sku), Price: price,
 			OpeningQuantity: opening, LowStockThreshold: threshold,
-		})
+		}, catalogKey)
 	require.NoError(t, err)
 	return listing
 }
@@ -164,7 +172,7 @@ func (f *fixture) row(t *testing.T, inventoryID uuid.UUID) availability.Row {
 	t.Helper()
 	var rows []availability.Row
 	require.NoError(t, f.db.Raw(`
-		SELECT inventory_id, store_id, product_variant_id, location::text AS location, price::text AS price,
+		SELECT inventory_id, store_id, product_variant_id, catalog_key, location::text AS location, price::text AS price,
 			price_updated_at, available_qty, availability_bucket, searchable, last_stock_update_at, version, updated_at
 		FROM store_product_availability WHERE inventory_id = ?`, inventoryID).Scan(&rows).Error)
 	require.Len(t, rows, 1, "every store product has a search row")
@@ -451,6 +459,46 @@ func TestConcurrentWritersLeaveNoDrift(t *testing.T) {
 	assert.Equal(t, "19.00", inA.Price, "the last price change wins")
 	assert.Equal(t, "10.00", inB.Price, "store A's prices never reach store B")
 	assert.True(t, inA.Searchable, "the last toggle reopened the store")
+}
+
+func TestSearchRowsCarryTheCatalogKey(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	storeID := f.addStore(t, stores.OnboardingCompleted)
+	key := fmt.Sprintf("todayz:%d", time.Now().UnixNano())
+
+	keyed := f.createKeyedProduct(t, storeID, &key, 40, 5, 0)
+	handMade := f.createProduct(t, storeID, 10, 5, 0)
+	assert.Equal(t, key, f.row(t, keyed.InventoryID).CatalogKey)
+	assert.Equal(t, "variant:"+handMade.VariantID.String(), f.row(t, handMade.InventoryID).CatalogKey,
+		"a product made by hand is a group of its own")
+
+	var keys []string
+	require.NoError(t, f.db.Raw(`SELECT catalog_key FROM store_product_search WHERE inventory_id = ?`,
+		keyed.InventoryID).Scan(&keys).Error)
+	assert.Equal(t, []string{key}, keys, "customer search can group by the key")
+
+	before := f.row(t, keyed.InventoryID)
+	require.NoError(t, f.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec(`UPDATE product_variant SET catalog_key = NULL WHERE id = ?`, keyed.VariantID).Error; err != nil {
+			return err
+		}
+		return availability.RefreshVariants(tx, []uuid.UUID{keyed.VariantID})
+	}))
+	after := f.row(t, keyed.InventoryID)
+	assert.Equal(t, "variant:"+keyed.VariantID.String(), after.CatalogKey)
+	assert.Equal(t, before.Version+1, after.Version)
+	var eventKey string
+	require.NoError(t, f.db.Raw(`SELECT payload->>'catalog_key' FROM outbox_event
+		WHERE aggregate_id = ? ORDER BY seq DESC LIMIT 1`, keyed.InventoryID).Scan(&eventKey).Error)
+	assert.Equal(t, after.CatalogKey, eventKey, "the event carries the new key")
+	f.assertInSync(t)
+
+	f.exec(t, `UPDATE store_product_availability SET catalog_key = 'todayz:1' WHERE inventory_id = ?`, handMade.InventoryID)
+	report, err := availability.Sync(ctx, f.db, availability.SyncOptions{StoreID: &storeID})
+	require.NoError(t, err)
+	require.Len(t, report.Drift, 1)
+	assert.Equal(t, []string{"catalog_key"}, report.Drift[0].Fields)
 }
 
 func TestSyncReportsAndRepairsDrift(t *testing.T) {

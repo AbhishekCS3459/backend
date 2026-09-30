@@ -19,6 +19,9 @@ var (
 	ErrVariantNotFound = errors.New("product not found")
 	// ErrSKUTaken: SKUs are unique per retailer (product_variant_retailer_sku_key).
 	ErrSKUTaken = errors.New("you already have a product with this SKU")
+	// ErrCatalogProductTaken: a retailer owns at most one variant of a catalogue
+	// product (product_variant_retailer_catalog_key_key).
+	ErrCatalogProductTaken = errors.New("you already have this catalogue product")
 )
 
 // openingStockNote labels the history entry for stock entered while adding a product.
@@ -29,7 +32,11 @@ type Repository interface {
 	StoreStats(ctx context.Context, storeID uuid.UUID) (*StoreSummary, error)
 	ListCatalog(ctx context.Context, retailerID, storeID uuid.UUID, query string) ([]CatalogItem, error)
 	AddListing(ctx context.Context, actorID, retailerID, storeID uuid.UUID, req *AddRequest, available bool) (*Listing, error)
-	CreateAndList(ctx context.Context, actorID, retailerID, storeID uuid.UUID, req *CreateProductRequest) (*Listing, error)
+	// CreateAndList creates a product and lists it. catalogKey is set only for
+	// a product added from the catalogue.
+	CreateAndList(
+		ctx context.Context, actorID, retailerID, storeID uuid.UUID, req *CreateProductRequest, catalogKey *string,
+	) (*Listing, error)
 	UpdateListing(ctx context.Context, storeID, variantID uuid.UUID, req *UpdateRequest) (*Listing, error)
 	RemoveListing(ctx context.Context, storeID, variantID uuid.UUID) error
 	FindListing(ctx context.Context, storeID, variantID uuid.UUID) (*Listing, error)
@@ -194,7 +201,7 @@ func (r *repository) AddListing(
 }
 
 func (r *repository) CreateAndList(
-	ctx context.Context, actorID, retailerID, storeID uuid.UUID, req *CreateProductRequest,
+	ctx context.Context, actorID, retailerID, storeID uuid.UUID, req *CreateProductRequest, catalogKey *string,
 ) (*Listing, error) {
 	available := true
 	if req.IsAvailable != nil {
@@ -243,11 +250,17 @@ func (r *repository) CreateAndList(
 			VariantLabel: "Default",
 			SKU:          strings.TrimSpace(req.SKU),
 			Price:        req.Price,
+			CatalogKey:   catalogKey,
 		}
 		if err := tx.Create(&variant).Error; err != nil {
 			var pgErr *pgconn.PgError
-			if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "product_variant_retailer_sku_key" {
-				return ErrSKUTaken
+			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+				switch pgErr.ConstraintName {
+				case "product_variant_retailer_sku_key":
+					return ErrSKUTaken
+				case "product_variant_retailer_catalog_key_key":
+					return ErrCatalogProductTaken
+				}
 			}
 			return err
 		}

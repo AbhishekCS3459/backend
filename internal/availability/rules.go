@@ -1,6 +1,6 @@
 // Package availability maintains store_product_availability, the read model
-// customer search uses. Every change to stock, listing, price or a store's
-// visibility or location refreshes the affected rows in the same transaction,
+// customer search uses. Every change to stock, listing, price, catalogue key or
+// a store's visibility or location refreshes the affected rows in the same transaction,
 // so search never lags behind the retailer. Customers read the table through
 // the store_product_search view, which hides the exact count.
 package availability
