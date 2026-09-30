@@ -70,17 +70,27 @@ func run(dbURL string, opts availability.SyncOptions) int {
 	for _, d := range report.Drift {
 		log.Warn().Str("inventory_id", d.InventoryID.String()).Strs("fields", d.Fields).Msg("drift")
 	}
+	for _, key := range report.MissingCatalogKeys {
+		log.Warn().Str("catalog_key", key).Msg("search key has no catalog_item")
+	}
 	log.Info().
 		Bool("apply", opts.Apply).
 		Int("checked", report.Checked).
 		Int("missing", report.Missing).
 		Int("stale", report.Stale).
 		Int("written", report.Written).
+		Int("missing_catalog_items", report.MissingCatalogItems).
 		Dur("took", time.Since(start)).
 		Msg("availability sync finished")
 	if err != nil {
 		log.Error().Err(err).Msg("availability sync failed")
 		return 1
+	}
+	if report.MissingCatalogItems > 0 {
+		log.Warn().Msg("catalog items are missing; run make catalog-item-sync-apply")
+		if opts.Apply {
+			return 1
+		}
 	}
 	if !opts.Apply && !report.Clean() {
 		log.Warn().Msg("drift found; run with -apply to repair it")

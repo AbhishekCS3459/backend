@@ -23,7 +23,9 @@ const (
 	MaxLimit       = 60
 	maxKeywords    = 5
 	maxFilterValue = 150
-	skuPrefix      = "TDZ-"
+	// SKUPrefix starts every catalogue product's SKU. It is reserved: a product
+	// made by hand can't use it.
+	SKUPrefix = "TDZ-"
 
 	MaxQueryLength = 200
 	// MaxSearchOffset bounds offset paging: $skip still reads every skipped result.
@@ -78,7 +80,12 @@ func productSKU(productID, id string) string {
 	if productID == "" {
 		productID = id[strings.LastIndex(id, ":")+1:]
 	}
-	return skuPrefix + productID
+	return SKU(productID)
+}
+
+// SKU is the Todayz SKU for a catalogue product id.
+func SKU(productID string) string {
+	return SKUPrefix + productID
 }
 
 // CatalogKeySource namespaces catalogue keys. Like the Todayz SKU, the key never
@@ -104,10 +111,10 @@ func ValidProductID(id string) bool {
 
 // skuProductID returns the product id inside a Todayz SKU such as "TDZ-776963".
 func skuProductID(query string) (string, bool) {
-	if len(query) <= len(skuPrefix) || !strings.EqualFold(query[:len(skuPrefix)], skuPrefix) {
+	if len(query) <= len(SKUPrefix) || !strings.EqualFold(query[:len(SKUPrefix)], SKUPrefix) {
 		return "", false
 	}
-	id := query[len(skuPrefix):]
+	id := query[len(SKUPrefix):]
 	return id, ValidProductID(id)
 }
 

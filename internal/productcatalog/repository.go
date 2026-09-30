@@ -41,6 +41,7 @@ type Repository interface {
 	Search(ctx context.Context, params SearchParams) (SearchResult, error)
 	Autocomplete(ctx context.Context, query string, limit int, filters Filters) ([]Suggestion, error)
 	ExistingProductIDs(ctx context.Context, ids []string) (map[string]bool, error)
+	CanonicalProducts(ctx context.Context, ids []string) (map[string]CanonicalProduct, error)
 }
 
 type repository struct {

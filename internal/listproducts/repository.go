@@ -2,12 +2,15 @@ package listproducts
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/AbhishekCS3459/find-me-backend/internal/catalogitem"
 	"github.com/AbhishekCS3459/find-me-backend/internal/inventory"
+	"github.com/AbhishekCS3459/find-me-backend/internal/productcatalog"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
@@ -32,10 +35,11 @@ type Repository interface {
 	StoreStats(ctx context.Context, storeID uuid.UUID) (*StoreSummary, error)
 	ListCatalog(ctx context.Context, retailerID, storeID uuid.UUID, query string) ([]CatalogItem, error)
 	AddListing(ctx context.Context, actorID, retailerID, storeID uuid.UUID, req *AddRequest, available bool) (*Listing, error)
-	// CreateAndList creates a product and lists it. catalogKey is set only for
-	// a product added from the catalogue.
+	// CreateAndList creates a product and lists it. source is set only for a
+	// product added from the catalogue.
 	CreateAndList(
-		ctx context.Context, actorID, retailerID, storeID uuid.UUID, req *CreateProductRequest, catalogKey *string,
+		ctx context.Context, actorID, retailerID, storeID uuid.UUID, req *CreateProductRequest,
+		source *productcatalog.CanonicalProduct,
 	) (*Listing, error)
 	UpdateListing(ctx context.Context, storeID, variantID uuid.UUID, req *UpdateRequest) (*Listing, error)
 	RemoveListing(ctx context.Context, storeID, variantID uuid.UUID) error
@@ -201,11 +205,25 @@ func (r *repository) AddListing(
 }
 
 func (r *repository) CreateAndList(
-	ctx context.Context, actorID, retailerID, storeID uuid.UUID, req *CreateProductRequest, catalogKey *string,
+	ctx context.Context, actorID, retailerID, storeID uuid.UUID, req *CreateProductRequest,
+	source *productcatalog.CanonicalProduct,
 ) (*Listing, error) {
 	available := true
 	if req.IsAvailable != nil {
 		available = *req.IsAvailable
+	}
+	var catalogKey *string
+	attributes := AttributesJSON([]byte("{}"))
+	if source != nil {
+		key := source.CatalogKey()
+		catalogKey = &key
+		if source.Unit != "" {
+			unit, err := json.Marshal(map[string]string{"unit": source.Unit})
+			if err != nil {
+				return nil, err
+			}
+			attributes = AttributesJSON(unit)
+		}
 	}
 	var variantID uuid.UUID
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -225,7 +243,7 @@ func (r *repository) CreateAndList(
 			BrandID:     brandID,
 			Name:        strings.TrimSpace(req.Name),
 			Description: strings.TrimSpace(req.Name),
-			Attributes:  AttributesJSON([]byte("{}")),
+			Attributes:  attributes,
 			Status:      "ACTIVE",
 			CreatedAt:   now,
 			UpdatedAt:   now,
@@ -254,17 +272,27 @@ func (r *repository) CreateAndList(
 		}
 		if err := tx.Create(&variant).Error; err != nil {
 			var pgErr *pgconn.PgError
-			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			if errors.As(err, &pgErr) {
 				switch pgErr.ConstraintName {
 				case "product_variant_retailer_sku_key":
 					return ErrSKUTaken
 				case "product_variant_retailer_catalog_key_key":
 					return ErrCatalogProductTaken
+				case "product_variant_reserved_sku":
+					return ErrReservedSKU
 				}
 			}
 			return err
 		}
 		variantID = variant.ID
+		item := catalogitem.Manual(variant.ID, product.Name, strings.TrimSpace(req.Brand),
+			strings.TrimSpace(req.Category), strings.TrimSpace(req.ImageURL))
+		if source != nil {
+			item = catalogitem.FromCatalogue(*source)
+		}
+		if _, err := catalogitem.Upsert(tx, item); err != nil {
+			return err
+		}
 		return r.listWithOpeningStock(tx, actorID, inventory.ListInput{
 			StoreID: storeID, VariantID: variant.ID, LowStockThreshold: req.LowStockThreshold,
 			IsAvailable: available, Price: &req.Price,

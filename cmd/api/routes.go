@@ -11,6 +11,7 @@ import (
 	"github.com/AbhishekCS3459/find-me-backend/internal/identity/retailer"
 	"github.com/AbhishekCS3459/find-me-backend/internal/inventory"
 	"github.com/AbhishekCS3459/find-me-backend/internal/listproducts"
+	"github.com/AbhishekCS3459/find-me-backend/internal/marketplace"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/database"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/health"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/middleware"
@@ -46,14 +47,16 @@ func SetupRoutes(db *database.DB, mongoClient *mongodb.Client, cfg *Config) *chi
 	router.Use(chiMiddleware.Timeout(60 * time.Second)) // Request timeout
 
 	corsConfig := &middleware.CORSConfig{
-		AllowedOrigins: []string{
+		AllowedOrigins: append([]string{
 			"http://localhost:3000",
 			"http://localhost:5173",
 			"https://todayz.in",
 			"https://www.todayz.in",
-		},
+		}, cfg.CORSAllowedOrigins...),
 		AllowedMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"},
-		AllowedHeaders: []string{"Content-Type", "Authorization", "X-API-Token", inventory.IdempotencyKeyHeader},
+		AllowedHeaders: []string{
+			"Content-Type", "Authorization", "X-API-Token", inventory.IdempotencyKeyHeader, marketplace.DebugHeader,
+		},
 		ExposedHeaders: []string{inventory.IdempotentReplayedHeader},
 		MaxAge:         3600,
 	}
@@ -98,6 +101,10 @@ func SetupRoutes(db *database.DB, mongoClient *mongodb.Client, cfg *Config) *chi
 	listProductsHandler := listproducts.NewHandler(listProductsService)
 	teamHandler := team.NewHandler(team.NewService(team.NewRepository(db.Gorm), storeAccess))
 	truecallerHandler := truecaller.NewHandler(truecaller.NewService(truecaller.NewStore(cfg.RedisURL), userService))
+	marketplaceHandler := marketplace.NewHandler(
+		marketplace.NewService(marketplace.NewRepository(db.Gorm), marketplace.Config{StaleAfter: cfg.MarketplaceStaleAfter}),
+		cfg.MarketplaceDebug,
+	)
 
 	// API Routes
 	// Note: API versioning structure ready for expansion
@@ -143,6 +150,8 @@ func SetupRoutes(db *database.DB, mongoClient *mongodb.Client, cfg *Config) *chi
 		r.Mount("/stores", storeHandler.Routes())
 		r.Mount("/team", teamHandler.Routes())
 		r.Mount("/truecaller", truecallerHandler.Routes())
+		// Public (see isPublicRoute); under the global rate limit like everything else.
+		r.Mount("/marketplace", marketplaceHandler.Routes())
 
 		// Future: API versioning example
 		// r.Route("/v2", func(r chi.Router) {

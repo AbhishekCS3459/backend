@@ -1,6 +1,7 @@
 package listproducts
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"strings"
@@ -16,10 +17,17 @@ var (
 	ErrCatalogProductNotFound = errors.New("this product is not in the catalogue")
 )
 
-// Catalogue reports which catalogue product ids exist (productcatalog.Service).
+// Catalogue looks up catalogue products (productcatalog.Service).
 type Catalogue interface {
-	ExistingProductIDs(ctx context.Context, ids []string) (map[string]bool, error)
+	CanonicalProducts(ctx context.Context, ids []string) (map[string]productcatalog.CanonicalProduct, error)
 }
+
+// Fallbacks for a catalogue product missing a brand or category; the product
+// tables require both.
+const (
+	unbranded     = "Unbranded"
+	uncategorised = "Uncategorised"
+)
 
 type Service interface {
 	List(ctx context.Context, userID, storeID uuid.UUID, query, status string) ([]Listing, *StoreSummary, error)
@@ -92,17 +100,24 @@ func (s *service) Create(ctx context.Context, userID, storeID uuid.UUID, req *Cr
 	if err != nil {
 		return nil, err
 	}
-	catalogKey, err := s.catalogKey(ctx, req.CatalogProductID)
+	source, err := s.catalogueProduct(ctx, req.CatalogProductID)
 	if err != nil {
 		return nil, err
 	}
-	return s.repo.CreateAndList(ctx, userID, retailerID, storeID, req, catalogKey)
+	if source == nil {
+		if err := validateManual(req); err != nil {
+			return nil, err
+		}
+	} else {
+		fromCatalogue(req, source)
+	}
+	return s.repo.CreateAndList(ctx, userID, retailerID, storeID, req, source)
 }
 
-// catalogKey returns the key for a catalogue product id, or nil for none. The
-// id must exist in the catalogue, so nobody can file their own product under
-// another product's key and appear in its search results.
-func (s *service) catalogKey(ctx context.Context, productID string) (*string, error) {
+// catalogueProduct returns the catalogue product a create names, or nil for a
+// product made by hand. The id must exist in the catalogue, so nobody can file
+// their own product under another product's key and appear in its search results.
+func (s *service) catalogueProduct(ctx context.Context, productID string) (*productcatalog.CanonicalProduct, error) {
 	productID = strings.TrimSpace(productID)
 	if productID == "" {
 		return nil, nil
@@ -113,15 +128,25 @@ func (s *service) catalogKey(ctx context.Context, productID string) (*string, er
 	if s.catalogue == nil {
 		return nil, productcatalog.ErrUnavailable
 	}
-	found, err := s.catalogue.ExistingProductIDs(ctx, []string{productID})
+	found, err := s.catalogue.CanonicalProducts(ctx, []string{productID})
 	if err != nil {
 		return nil, err
 	}
-	if !found[productID] {
+	product, ok := found[productID]
+	if !ok || product.Name == "" {
 		return nil, ErrCatalogProductNotFound
 	}
-	key := productcatalog.CatalogKey(productID)
-	return &key, nil
+	return &product, nil
+}
+
+// fromCatalogue replaces the client's description of a catalogue product with
+// the catalogue's, so the product reads the same at every retailer.
+func fromCatalogue(req *CreateProductRequest, p *productcatalog.CanonicalProduct) {
+	req.Name = p.Name
+	req.Brand = cmp.Or(p.Brand, unbranded)
+	req.Category = cmp.Or(p.Category, uncategorised)
+	req.ImageURL = p.ImageURL
+	req.SKU = p.SKU()
 }
 
 // Update needs pricing permission to change the price and stock permission
@@ -161,8 +186,10 @@ func MapError(err error) (int, string) {
 		return 409, "you already have this catalogue product; add it from your products instead"
 	case errors.Is(err, ErrInvalidCatalogProduct):
 		return 400, err.Error()
-	case errors.Is(err, ErrCatalogProductNotFound):
+	case errors.Is(err, ErrCatalogProductNotFound), errors.Is(err, ErrReservedSKU):
 		return 422, err.Error()
+	case errors.Is(err, ErrInvalidProduct):
+		return 400, err.Error()
 	case errors.Is(err, productcatalog.ErrUnavailable), errors.Is(err, productcatalog.ErrTimeout):
 		return 503, "the product catalogue is unavailable right now; try again shortly"
 	default:

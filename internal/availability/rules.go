@@ -12,8 +12,9 @@ const (
 	InStock Bucket = "IN_STOCK"
 	Low     Bucket = "LOW"
 	Out     Bucket = "OUT"
-	// ConfirmWithStore is for stock nobody has confirmed in 14 days. It is never
-	// stored: the store_product_search view assigns it at read time.
+	// ConfirmWithStore is for stock nobody has confirmed recently (14 days by
+	// default). It is never stored: the marketplace (MARKETPLACE_STALE_AFTER)
+	// and the store_product_search view assign it at read time.
 	ConfirmWithStore Bucket = "CONFIRM_WITH_STORE"
 )
 

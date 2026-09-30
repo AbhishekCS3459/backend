@@ -161,6 +161,9 @@ func isPublicRoute(path string) bool {
 		"/api/truecaller/start",
 		"/api/truecaller/callback",
 		"/api/truecaller/status",
+		// Customer discovery needs no account. The trailing slash keeps a
+		// future /api/marketplace-admin route from becoming public by prefix.
+		"/api/marketplace/",
 		"/swagger",
 	}
 

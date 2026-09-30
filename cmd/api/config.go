@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Config holds all application configuration loaded from environment variables
@@ -42,6 +43,15 @@ type Config struct {
 	// OutboxPublisherEnabled runs the outbox publisher in this process. Safe
 	// on several instances at once.
 	OutboxPublisherEnabled bool
+
+	// CORSAllowedOrigins are added to the built-in origins (e.g. a test UI).
+	CORSAllowedOrigins []string
+
+	// Marketplace (public customer search)
+	// MarketplaceStaleAfter: stock unconfirmed for longer shows CONFIRM_WITH_STORE.
+	MarketplaceStaleAfter time.Duration
+	// MarketplaceDebug lets X-Debug: 1 return exact quantities. Always false in production.
+	MarketplaceDebug bool
 
 	// Bootstrap admin (optional - created on startup if no admin exists)
 	BootstrapAdminEmail    string
@@ -89,6 +99,18 @@ func LoadConfig() (*Config, error) {
 	cfg.RedisURL = getEnv("REDIS_URL", cfg.QueueURL)
 	cfg.OutboxPublisherEnabled = getEnv("OUTBOX_PUBLISHER_ENABLED", "true") == "true"
 
+	for _, origin := range strings.Split(getEnv("CORS_ALLOWED_ORIGINS", ""), ",") {
+		if origin = strings.TrimSpace(origin); origin != "" {
+			cfg.CORSAllowedOrigins = append(cfg.CORSAllowedOrigins, origin)
+		}
+	}
+
+	cfg.MarketplaceStaleAfter = parseDuration(getEnv("MARKETPLACE_STALE_AFTER", "336h"), 14*24*time.Hour)
+	// Never in production, whatever the flag says: debug mode exposes exact stock.
+	cfg.MarketplaceDebug = getEnv("DEBUG_MARKETPLACE", "false") == "true" && cfg.Environment != "production"
+	if getEnv("DEBUG_MARKETPLACE", "false") == "true" && cfg.Environment == "production" {
+		fmt.Fprintf(os.Stderr, "WARNING: DEBUG_MARKETPLACE is ignored in production\n")
+	}
 	cfg.BootstrapAdminEmail = getEnv("BOOTSTRAP_ADMIN_EMAIL", "")
 	cfg.BootstrapAdminPassword = getEnv("BOOTSTRAP_ADMIN_PASSWORD", "")
 	cfg.BootstrapAdminPhone = getEnv("BOOTSTRAP_ADMIN_PHONE", "+10000000000")
@@ -123,6 +145,15 @@ func getEnvRequired(key string) string {
 func parseInt(s string, defaultValue int) int {
 	val, err := strconv.Atoi(s)
 	if err != nil {
+		return defaultValue
+	}
+	return val
+}
+
+// parseDuration parses a positive duration such as "336h", returning defaultValue otherwise
+func parseDuration(s string, defaultValue time.Duration) time.Duration {
+	val, err := time.ParseDuration(s)
+	if err != nil || val <= 0 {
 		return defaultValue
 	}
 	return val

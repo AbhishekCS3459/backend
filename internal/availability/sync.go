@@ -31,9 +31,14 @@ type SyncReport struct {
 	Written int
 	// Drift holds the first maxReportedDrift differences.
 	Drift []Drift
+	// MissingCatalogItems counts search keys with no catalog_item row, so
+	// customers would see stores but no product. Sync never writes them;
+	// cmd/catalog-item-sync does. MissingCatalogKeys holds the first few.
+	MissingCatalogItems int
+	MissingCatalogKeys  []string
 }
 
-func (r SyncReport) Clean() bool { return r.Missing == 0 && r.Stale == 0 }
+func (r SyncReport) Clean() bool { return r.Missing == 0 && r.Stale == 0 && r.MissingCatalogItems == 0 }
 
 const maxReportedDrift = 50
 
@@ -56,7 +61,8 @@ func Sync(ctx context.Context, db *gorm.DB, opts SyncOptions) (SyncReport, error
 			return report, err
 		}
 		if len(ids) == 0 {
-			return report, nil
+			report.MissingCatalogItems, report.MissingCatalogKeys, err = missingCatalogItems(ctx, db, opts.StoreID)
+			return report, err
 		}
 		after = ids[len(ids)-1]
 		report.Checked += len(ids)
@@ -97,6 +103,24 @@ func Sync(ctx context.Context, db *gorm.DB, opts SyncOptions) (SyncReport, error
 			}
 		}
 	}
+}
+
+// missingCatalogItems returns how many search keys have no catalog_item row,
+// and the first maxReportedDrift of them.
+func missingCatalogItems(ctx context.Context, db *gorm.DB, storeID *uuid.UUID) (int, []string, error) {
+	query := `
+		SELECT DISTINCT a.catalog_key FROM store_product_availability a
+		WHERE NOT EXISTS (SELECT 1 FROM catalog_item c WHERE c.catalog_key = a.catalog_key)`
+	var args []any
+	if storeID != nil {
+		query += ` AND a.store_id = ?`
+		args = append(args, *storeID)
+	}
+	var keys []string
+	if err := db.WithContext(ctx).Raw(query+` ORDER BY 1`, args...).Scan(&keys).Error; err != nil {
+		return 0, nil, fmt.Errorf("check catalog items: %w", err)
+	}
+	return len(keys), keys[:min(len(keys), maxReportedDrift)], nil
 }
 
 func nextPage(ctx context.Context, db *gorm.DB, after uuid.UUID, storeID *uuid.UUID, limit int) ([]uuid.UUID, error) {

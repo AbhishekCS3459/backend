@@ -13,6 +13,7 @@ type Service interface {
 	Search(ctx context.Context, params SearchParams) (SearchResult, error)
 	Autocomplete(ctx context.Context, query string, limit int, filters Filters) ([]Suggestion, error)
 	ExistingProductIDs(ctx context.Context, ids []string) (map[string]bool, error)
+	CanonicalProducts(ctx context.Context, ids []string) (map[string]CanonicalProduct, error)
 }
 
 type service struct {
@@ -106,6 +107,14 @@ func (s *service) ExistingProductIDs(ctx context.Context, ids []string) (map[str
 		return nil, ErrUnavailable
 	}
 	return s.repo.ExistingProductIDs(ctx, ids)
+}
+
+// CanonicalProducts returns the canonical record of each id the catalogue has.
+func (s *service) CanonicalProducts(ctx context.Context, ids []string) (map[string]CanonicalProduct, error) {
+	if s.repo == nil {
+		return nil, ErrUnavailable
+	}
+	return s.repo.CanonicalProducts(ctx, ids)
 }
 
 func clampLimit(limit, fallback, max int) int {

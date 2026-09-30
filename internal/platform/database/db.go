@@ -3,6 +3,8 @@ package database
 import (
 	"context"
 	"fmt"
+	stdlog "log"
+	"os"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -72,7 +74,14 @@ func openGorm(pool *pgxpool.Pool) (*gorm.DB, error) {
 	}), &gorm.Config{
 		// Schema stays in migrations/; avoid AutoMigrate fighting migrate files.
 		DisableForeignKeyConstraintWhenMigrating: true,
-		Logger:                                   logger.Default.LogMode(logger.Warn),
+		// logger.Default's settings, minus ErrRecordNotFound: optional lookups
+		// (e.g. bank details not added yet) handle it and it isn't a failure.
+		Logger: logger.New(stdlog.New(os.Stdout, "\r\n", stdlog.LstdFlags), logger.Config{
+			SlowThreshold:             200 * time.Millisecond,
+			LogLevel:                  logger.Warn,
+			IgnoreRecordNotFoundError: true,
+			Colorful:                  true,
+		}),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to open gorm: %w", err)

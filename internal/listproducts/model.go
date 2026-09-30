@@ -145,13 +145,16 @@ type AddRequest struct {
 	IsAvailable       *bool `json:"is_available"`
 }
 
+// CreateProductRequest creates a product and lists it. For a catalogue product
+// the server takes name, brand, category, image and SKU from the catalogue and
+// ignores the client's values; a product made by hand needs all but the image.
 type CreateProductRequest struct {
-	Name              string  `json:"name" validate:"required,min=2,max=255"`
-	Brand             string  `json:"brand" validate:"required,min=1,max=255"`
-	Category          string  `json:"category" validate:"required,min=1,max=255"`
-	SKU               string  `json:"sku" validate:"required,min=2,max=255"`
+	Name              string  `json:"name" validate:"max=255"`
+	Brand             string  `json:"brand" validate:"max=255"`
+	Category          string  `json:"category" validate:"max=255"`
+	SKU               string  `json:"sku" validate:"max=255"`
 	Price             float64 `json:"price" validate:"required,gt=0"` // the default and this store's price
-	ImageURL          string  `json:"image_url"`
+	ImageURL          string  `json:"image_url" validate:"max=2048"`
 	OpeningQuantity   int     `json:"opening_quantity" validate:"min=0,max=1000000"`
 	LowStockThreshold int     `json:"low_stock_threshold" validate:"min=0"`
 	IsAvailable       *bool   `json:"is_available"`

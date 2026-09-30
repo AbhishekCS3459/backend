@@ -12,6 +12,7 @@ import (
 	"github.com/AbhishekCS3459/find-me-backend/internal/inventory"
 	"github.com/AbhishekCS3459/find-me-backend/internal/listproducts"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/database"
+	"github.com/AbhishekCS3459/find-me-backend/internal/productcatalog"
 	"github.com/AbhishekCS3459/find-me-backend/internal/storeaccess"
 	"github.com/AbhishekCS3459/find-me-backend/internal/stores"
 	"github.com/google/uuid"
@@ -158,12 +159,18 @@ func (f *fixture) createKeyedProduct(
 ) *listproducts.Listing {
 	t.Helper()
 	f.sku++
+	var source *productcatalog.CanonicalProduct
+	if catalogKey != nil {
+		id, ok := productcatalog.CatalogKeyProductID(*catalogKey)
+		require.True(t, ok)
+		source = &productcatalog.CanonicalProduct{ProductID: id, Name: "Availability Soap"}
+	}
 	listing, err := f.listings.CreateAndList(context.Background(), f.userID, f.retailerID, storeID,
 		&listproducts.CreateProductRequest{
 			Name: "Availability Soap", Brand: f.brand(), Category: f.category(),
 			SKU: fmt.Sprintf("AV-%s-%d", f.suffix, f.sku), Price: price,
 			OpeningQuantity: opening, LowStockThreshold: threshold,
-		}, catalogKey)
+		}, source)
 	require.NoError(t, err)
 	return listing
 }

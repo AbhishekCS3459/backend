@@ -49,9 +49,13 @@ type createOnly struct {
 }
 
 func (r *createOnly) CreateAndList(
-	_ context.Context, _, _, _ uuid.UUID, _ *CreateProductRequest, catalogKey *string,
+	_ context.Context, _, _, _ uuid.UUID, _ *CreateProductRequest, source *productcatalog.CanonicalProduct,
 ) (*Listing, error) {
-	r.called, r.catalogKey = true, catalogKey
+	r.called = true
+	if source != nil {
+		key := source.CatalogKey()
+		r.catalogKey = &key
+	}
 	return &Listing{}, nil
 }
 
@@ -61,13 +65,15 @@ type catalogue struct {
 	err error
 }
 
-func (c catalogue) ExistingProductIDs(_ context.Context, ids []string) (map[string]bool, error) {
+func (c catalogue) CanonicalProducts(_ context.Context, ids []string) (map[string]productcatalog.CanonicalProduct, error) {
 	if c.err != nil {
 		return nil, c.err
 	}
-	found := map[string]bool{}
+	found := map[string]productcatalog.CanonicalProduct{}
 	for _, id := range ids {
-		found[id] = slices.Contains(c.ids, id)
+		if slices.Contains(c.ids, id) {
+			found[id] = productcatalog.CanonicalProduct{ProductID: id, Name: "Catalogue product"}
+		}
 	}
 	return found, nil
 }
@@ -93,7 +99,9 @@ func TestCreatingFromTheCatalogueNeedsARealCatalogueProduct(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := &createOnly{}
 			_, err := NewService(repo, staff{storeaccess.CatalogManage}, tc.catalogue).Create(
-				context.Background(), uuid.New(), uuid.New(), &CreateProductRequest{CatalogProductID: tc.productID})
+				context.Background(), uuid.New(), uuid.New(), &CreateProductRequest{
+					Name: "Cola", Brand: "Cola Co", Category: "Drinks", SKU: "COLA-1", CatalogProductID: tc.productID,
+				})
 			if tc.wantErr != nil {
 				assert.ErrorIs(t, err, tc.wantErr)
 				assert.False(t, repo.called, "nothing is created")

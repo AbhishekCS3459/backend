@@ -1,13 +1,24 @@
-// Command catalog-key-check confirms that every catalogue key on a product
-// variant (todayz:<productId>) names a product in the MongoDB catalogue.
-// Migration 000046 set keys from TDZ-<productId> SKUs, and a retailer can type
-// such a SKU by hand, so a key can name a product that doesn't exist. Without
-// -apply it only reports those keys and exits 1 if there are any; with -apply
-// it clears them, so the product forms its own search group, and refreshes the
-// search rows in the same transaction. It is safe to run while the API is serving.
+// Command catalog-key-check audits catalogue identity on product variants.
 //
-//	go run ./cmd/catalog-key-check          # report only
-//	go run ./cmd/catalog-key-check -apply   # clear unknown keys
+// TDZ-<productId> SKUs and todayz:<productId> keys belong to catalogue
+// products only. Migration 000046 inferred keys from SKUs, and until 000047 a
+// retailer could type such a SKU by hand, so it reports:
+//
+//   - unknown: a key naming a product that isn't in the MongoDB catalogue;
+//   - name mismatch: a key whose variant's name is very different from the
+//     catalogue's, likely a hand-typed SKU that happened to match a product;
+//   - reserved SKU: a variant without a key whose SKU starts with TDZ-
+//     (including the case-only duplicates 000046 skipped).
+//
+// Without -apply it only reports and exits 1 if anything is found. With -apply
+// it clears unknown keys (and, with -include-name-mismatches, mismatched ones)
+// and renames the reserved SKUs of products without a key to MANUAL-<sku>, so
+// they form their own search group and migration 000048 can validate. Search
+// rows are refreshed in the same transaction. Safe to run while the API serves.
+//
+//	go run ./cmd/catalog-key-check                                   # report only
+//	go run ./cmd/catalog-key-check -apply                            # repair unknown keys and reserved SKUs
+//	go run ./cmd/catalog-key-check -apply -include-name-mismatches   # also repair name mismatches
 //
 // It reads DATABASE_URL and DATABASE_URL_MONGODB_PROD from the same .env files
 // as the API, chosen by ENVIRONMENT (default development).
@@ -21,7 +32,9 @@ import (
 	"io/fs"
 	"os"
 	"os/signal"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
@@ -35,10 +48,32 @@ import (
 	"github.com/AbhishekCS3459/find-me-backend/internal/productcatalog"
 )
 
+// minNameSimilarity is the trigram similarity below which a variant's name is
+// reported as not matching its catalogue product (pg_trgm's default threshold).
+const minNameSimilarity = 0.3
+
+// manualSKUPrefix is prepended to a reserved SKU rather than replacing it, so
+// the retailer still recognises the SKU they typed.
+const manualSKUPrefix = "MANUAL-"
+
+// reservedSKU matches expr as migration 000047's constraint matches sku.
+func reservedSKU(expr string) string {
+	return `regexp_replace(` + expr + `, '[\u00AD\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF]', '', 'g') ~* '^\s*TDZ-'`
+}
+
+type options struct {
+	apply          bool
+	nameMismatches bool
+	batch          int
+}
+
 func main() {
-	apply := flag.Bool("apply", false, "clear keys whose product isn't in the catalogue (default: report only)")
-	batch := flag.Int("batch", 500, "variants per catalogue lookup and transaction")
+	var opts options
+	flag.BoolVar(&opts.apply, "apply", false, "repair what is found (default: report only)")
+	flag.BoolVar(&opts.nameMismatches, "include-name-mismatches", false, "with -apply, also clear keys whose name doesn't match the catalogue")
+	flag.IntVar(&opts.batch, "batch", 500, "variants per catalogue lookup and transaction")
 	flag.Parse()
+	opts.batch = min(max(opts.batch, 1), 1000)
 
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 	loadEnvFiles()
@@ -51,11 +86,23 @@ func main() {
 	if mongoURL == "" {
 		log.Fatal().Msg("DATABASE_URL_MONGODB_PROD is not set; the catalogue is needed to check keys")
 	}
-	os.Exit(run(dbURL, mongoURL, *apply, min(max(*batch, 1), 1000)))
+	os.Exit(run(dbURL, mongoURL, opts))
+}
+
+type report struct {
+	checked, unknown, mismatched, reserved, cleared, renamed int
+}
+
+func (r report) findings(opts options) int {
+	n := r.unknown + r.reserved
+	if !opts.apply || opts.nameMismatches {
+		n += r.mismatched
+	}
+	return n
 }
 
 // run returns the exit code, so its deferred cleanup runs before the process exits.
-func run(dbURL, mongoURL string, apply bool, batch int) int {
+func run(dbURL, mongoURL string, opts options) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
@@ -75,121 +122,232 @@ func run(dbURL, mongoURL string, apply bool, batch int) int {
 		Collection(envOr("MONGODB_CATALOG_COLLECTION", "products")))
 
 	start := time.Now()
-	checked, unknown, cleared, err := check(ctx, db.Gorm, catalogue, apply, batch)
+	var rep report
+	err = checkKeys(ctx, db.Gorm, catalogue, opts, &rep)
+	if err == nil {
+		err = checkReservedSKUs(ctx, db.Gorm, opts, &rep)
+	}
 	log.Info().
-		Bool("apply", apply).
-		Int("checked", checked).
-		Int("unknown", unknown).
-		Int("cleared", cleared).
+		Bool("apply", opts.apply).
+		Int("checked", rep.checked).
+		Int("unknown", rep.unknown).
+		Int("name_mismatch", rep.mismatched).
+		Int("reserved_sku_without_key", rep.reserved).
+		Int("keys_cleared", rep.cleared).
+		Int("skus_renamed", rep.renamed).
 		Dur("took", time.Since(start)).
 		Msg("catalog key check finished")
 	if err != nil {
 		log.Error().Err(err).Msg("catalog key check failed")
 		return 1
 	}
-	if !apply && unknown > 0 {
-		log.Warn().Msg("keys name products that aren't in the catalogue; run with -apply to clear them")
+	if !opts.apply && rep.findings(opts) > 0 {
+		log.Warn().Msg("run with -apply to repair (add -include-name-mismatches to clear mismatched keys too)")
 		return 1
 	}
 	return 0
 }
 
-type keyedVariant struct {
+type variant struct {
 	ID         uuid.UUID
 	RetailerID uuid.UUID
 	SKU        string
-	CatalogKey string
+	CatalogKey *string
+	Name       string
 }
 
-// check pages through variants with a catalogue key and looks their products
-// up in the catalogue, clearing the unknown ones when apply is set.
-func check(
-	ctx context.Context, db *gorm.DB, catalogue productcatalog.Repository, apply bool, batch int,
-) (checked, unknown, cleared int, err error) {
+// checkKeys pages through variants with a catalogue key and compares each with
+// its catalogue product.
+func checkKeys(ctx context.Context, db *gorm.DB, catalogue productcatalog.Repository, opts options, rep *report) error {
 	after := uuid.Nil
 	for {
 		if err := ctx.Err(); err != nil {
-			return checked, unknown, cleared, err
+			return err
 		}
-		var page []keyedVariant
+		var page []variant
 		err := db.WithContext(ctx).Raw(`
-			SELECT id, retailer_id, sku, catalog_key FROM product_variant
-			WHERE catalog_key LIKE ? AND id > ?
-			ORDER BY id LIMIT ?`, productcatalog.CatalogKeySource+":%", after, batch).Scan(&page).Error
+			SELECT v.id, v.retailer_id, v.sku, v.catalog_key, p.name
+			FROM product_variant v JOIN product p ON p.id = v.product_id
+			WHERE v.catalog_key LIKE ? AND v.id > ?
+			ORDER BY v.id LIMIT ?`, productcatalog.CatalogKeySource+":%", after, opts.batch).Scan(&page).Error
 		if err != nil {
-			return checked, unknown, cleared, fmt.Errorf("list keyed variants: %w", err)
+			return fmt.Errorf("list keyed variants: %w", err)
 		}
 		if len(page) == 0 {
-			return checked, unknown, cleared, nil
+			return nil
 		}
 		after = page[len(page)-1].ID
-		checked += len(page)
+		rep.checked += len(page)
 
-		missing, err := unknownKeys(ctx, catalogue, page)
+		ids := make([]string, 0, len(page))
+		for _, v := range page {
+			if id, ok := productcatalog.CatalogKeyProductID(*v.CatalogKey); ok {
+				ids = append(ids, id)
+			}
+		}
+		products, err := catalogue.CanonicalProducts(ctx, ids)
 		if err != nil {
-			return checked, unknown, cleared, err
+			return fmt.Errorf("look up catalogue products: %w", err)
 		}
-		unknown += len(missing)
-		for _, v := range missing {
-			log.Warn().Str("variant_id", v.ID.String()).Str("retailer_id", v.RetailerID.String()).
-				Str("sku", v.SKU).Str("catalog_key", v.CatalogKey).Msg("product not in the catalogue")
+		var repair []variant
+		for _, v := range page {
+			id, ok := productcatalog.CatalogKeyProductID(*v.CatalogKey)
+			product, found := products[id]
+			event := log.Warn().Str("variant_id", v.ID.String()).Str("retailer_id", v.RetailerID.String()).
+				Str("sku", v.SKU).Str("catalog_key", *v.CatalogKey).Str("name", v.Name)
+			switch {
+			case !ok || !found:
+				rep.unknown++
+				event.Msg("product not in the catalogue")
+				repair = append(repair, v)
+			case nameSimilarity(v.Name, product.Name) < minNameSimilarity:
+				rep.mismatched++
+				event.Str("catalogue_name", product.Name).
+					Float64("similarity", nameSimilarity(v.Name, product.Name)).
+					Msg("name doesn't match the catalogue product")
+				if opts.nameMismatches {
+					repair = append(repair, v)
+				}
+			}
 		}
-		if !apply || len(missing) == 0 {
+		if !opts.apply || len(repair) == 0 {
 			continue
 		}
-		n, err := clearKeys(ctx, db, missing)
-		cleared += n
+		if err := repairVariants(ctx, db, repair, rep); err != nil {
+			return err
+		}
+	}
+}
+
+// checkReservedSKUs finds variants without a key that still use a TDZ- SKU.
+func checkReservedSKUs(ctx context.Context, db *gorm.DB, opts options, rep *report) error {
+	after := uuid.Nil
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		var page []variant
+		err := db.WithContext(ctx).Raw(`
+			SELECT v.id, v.retailer_id, v.sku, v.catalog_key, p.name
+			FROM product_variant v JOIN product p ON p.id = v.product_id
+			WHERE v.catalog_key IS NULL AND `+reservedSKU("v.sku")+` AND v.id > ?
+			ORDER BY v.id LIMIT ?`, after, opts.batch).Scan(&page).Error
 		if err != nil {
-			return checked, unknown, cleared, err
+			return fmt.Errorf("list reserved SKUs: %w", err)
+		}
+		if len(page) == 0 {
+			return nil
+		}
+		after = page[len(page)-1].ID
+		rep.reserved += len(page)
+		for _, v := range page {
+			log.Warn().Str("variant_id", v.ID.String()).Str("retailer_id", v.RetailerID.String()).
+				Str("sku", v.SKU).Str("name", v.Name).Msg("product without a catalogue key uses a TDZ- SKU")
+		}
+		if opts.apply {
+			if err := repairVariants(ctx, db, page, rep); err != nil {
+				return err
+			}
 		}
 	}
 }
 
-func unknownKeys(
-	ctx context.Context, catalogue productcatalog.Repository, page []keyedVariant,
-) ([]keyedVariant, error) {
-	ids := make([]string, 0, len(page))
-	for _, v := range page {
-		if id, ok := productcatalog.CatalogKeyProductID(v.CatalogKey); ok {
-			ids = append(ids, id)
-		}
-	}
-	found, err := catalogue.ExistingProductIDs(ctx, ids)
-	if err != nil {
-		return nil, fmt.Errorf("look up catalogue products: %w", err)
-	}
-	var missing []keyedVariant
-	for _, v := range page {
-		if id, ok := productcatalog.CatalogKeyProductID(v.CatalogKey); !ok || !found[id] {
-			missing = append(missing, v)
-		}
-	}
-	return missing, nil
-}
-
-// clearKeys removes the keys and rebuilds the variants' search rows in one
-// transaction. A key that changed since it was read is left alone.
-func clearKeys(ctx context.Context, db *gorm.DB, variants []keyedVariant) (int, error) {
-	cleared := 0
-	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+// repairVariants clears each variant's key and gives it a SKU outside the
+// reserved prefix, then rebuilds the variants' search rows, in one
+// transaction. A variant changed since it was read is left alone.
+func repairVariants(ctx context.Context, db *gorm.DB, variants []variant, rep *report) error {
+	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		ids := make([]uuid.UUID, 0, len(variants))
+		cleared, renamed := 0, 0
 		for _, v := range variants {
-			res := tx.Exec(`UPDATE product_variant SET catalog_key = NULL, updated_at = NOW()
-				WHERE id = ? AND catalog_key = ?`, v.ID, v.CatalogKey)
-			if res.Error != nil {
-				return fmt.Errorf("clear catalog key: %w", res.Error)
+			sku, err := manualSKU(tx, v)
+			if err != nil {
+				return err
 			}
-			if res.RowsAffected > 0 {
-				ids = append(ids, v.ID)
+			res := tx.Exec(`UPDATE product_variant SET catalog_key = NULL, sku = ?, updated_at = NOW()
+				WHERE id = ? AND sku = ? AND catalog_key IS NOT DISTINCT FROM ?`, sku, v.ID, v.SKU, v.CatalogKey)
+			if res.Error != nil {
+				return fmt.Errorf("repair variant %s: %w", v.ID, res.Error)
+			}
+			if res.RowsAffected == 0 {
+				continue
+			}
+			ids = append(ids, v.ID)
+			if v.CatalogKey != nil {
+				cleared++
+			}
+			if sku != v.SKU {
+				renamed++
+				log.Info().Str("variant_id", v.ID.String()).Str("from", v.SKU).Str("to", sku).Msg("renamed SKU")
 			}
 		}
-		cleared = len(ids)
-		return availability.RefreshVariants(tx, ids)
+		if err := availability.RefreshVariants(tx, ids); err != nil {
+			return err
+		}
+		rep.cleared += cleared
+		rep.renamed += renamed
+		return nil
 	})
-	if err != nil {
-		return 0, err
+}
+
+// manualSKU is the SKU a variant keeps once it is no longer a catalogue
+// product: unchanged unless it is reserved, otherwise MANUAL-<sku>, with a
+// numeric suffix if the retailer already has that SKU.
+func manualSKU(tx *gorm.DB, v variant) (string, error) {
+	var reserved bool
+	if err := tx.Raw(`SELECT `+reservedSKU("?::text"), v.SKU).Scan(&reserved).Error; err != nil {
+		return "", fmt.Errorf("check SKU: %w", err)
 	}
-	return cleared, nil
+	if !reserved {
+		return v.SKU, nil
+	}
+	base := manualSKUPrefix + strings.TrimSpace(v.SKU)
+	for n := 1; n <= 100; n++ {
+		candidate := base
+		if n > 1 {
+			candidate = fmt.Sprintf("%s-%d", base, n)
+		}
+		var taken int64
+		err := tx.Raw(`SELECT COUNT(*) FROM product_variant WHERE retailer_id = ? AND sku = ?`, v.RetailerID, candidate).
+			Scan(&taken).Error
+		if err != nil {
+			return "", fmt.Errorf("check SKU: %w", err)
+		}
+		if taken == 0 {
+			return candidate, nil
+		}
+	}
+	return "", fmt.Errorf("no free SKU for variant %s", v.ID)
+}
+
+// nameSimilarity is the trigram similarity of two names (as pg_trgm computes
+// it): 1 for the same words, 0 for nothing in common.
+func nameSimilarity(a, b string) float64 {
+	ta, tb := trigrams(a), trigrams(b)
+	if len(ta) == 0 && len(tb) == 0 {
+		return 1
+	}
+	shared := 0
+	for t := range ta {
+		if tb[t] {
+			shared++
+		}
+	}
+	return float64(shared) / float64(len(ta)+len(tb)-shared)
+}
+
+func trigrams(s string) map[string]bool {
+	out := map[string]bool{}
+	words := strings.FieldsFunc(strings.ToLower(s), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+	for _, word := range words {
+		padded := []rune("  " + word + " ")
+		for i := 0; i+3 <= len(padded); i++ {
+			out[string(padded[i:i+3])] = true
+		}
+	}
+	return out
 }
 
 func envOr(key, fallback string) string {

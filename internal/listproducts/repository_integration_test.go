@@ -9,6 +9,7 @@ import (
 
 	"github.com/AbhishekCS3459/find-me-backend/internal/inventory"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/database"
+	"github.com/AbhishekCS3459/find-me-backend/internal/productcatalog"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -146,9 +147,15 @@ func TestACatalogueProductIsOwnedOncePerRetailer(t *testing.T) {
 	suffix := userID.String()[:8]
 	key := fmt.Sprintf("todayz:%d", time.Now().UnixNano())
 	create := func(r Repository, user, retailer, store uuid.UUID, sku string, catalogKey *string) (*Listing, error) {
+		var source *productcatalog.CanonicalProduct
+		if catalogKey != nil {
+			id, ok := productcatalog.CatalogKeyProductID(*catalogKey)
+			require.True(t, ok)
+			source = &productcatalog.CanonicalProduct{ProductID: id, Name: "Cola 500 ml"}
+		}
 		return r.CreateAndList(ctx, user, retailer, store, &CreateProductRequest{
 			Name: "Cola 500 ml", Brand: "lp-brand-" + suffix, Category: "lp-test-" + suffix, SKU: sku, Price: 40,
-		}, catalogKey)
+		}, source)
 	}
 	storedKey := func(variantID uuid.UUID) *string {
 		var rows []struct{ CatalogKey *string }
@@ -174,7 +181,7 @@ func TestACatalogueProductIsOwnedOncePerRetailer(t *testing.T) {
 	assert.Nil(t, storedKey(handMade.VariantID), "a product made by hand has no key")
 
 	reserved := "variant:" + uuid.NewString()
-	_, err = create(repo, userID, retailerID, storeID, "LP-R-"+suffix, &reserved)
+	err = db.Exec(`UPDATE product_variant SET catalog_key = ? WHERE id = ?`, reserved, handMade.VariantID).Error
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "product_variant_catalog_key_format", "variant: keys belong to the search table")
 }

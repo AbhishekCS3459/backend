@@ -1,4 +1,4 @@
-.PHONY: help swagger swagger-serve build run run-prod run-dev dev stop lint lint-fix fmt vet test test-coverage test-utils bench-utils test-setup check migrate-up migrate-down migrate-create migrate-status docker-up docker-down docker-build monitoring-up monitoring-down clean catalog-indexes catalog-cleanup-preview catalog-prepare availability-check availability-backfill catalog-key-check catalog-key-repair
+.PHONY: help swagger swagger-serve build run run-prod run-dev dev stop lint lint-fix fmt vet test test-coverage test-utils bench-utils test-setup check migrate-up migrate-down migrate-create migrate-status docker-up docker-down docker-build monitoring-up monitoring-down clean catalog-indexes catalog-cleanup-preview catalog-prepare availability-check availability-backfill catalog-key-check catalog-key-repair catalog-item-sync catalog-item-sync-apply
 
 # Local development database 
 DEV_DATABASE_URL=postgresql://postgres:postgres@localhost:5434/find_me?sslmode=disable
@@ -44,9 +44,10 @@ help:
 	@echo "  make catalog-indexes  - Create the MongoDB catalogue indexes and the product_search Atlas Search index"
 	@echo "  make availability-check    - Report customer search rows that don't match inventory (exits 1 on drift)"
 	@echo "  make availability-backfill - Build or repair the customer search table from inventory"
-	@echo "  make catalog-key-check     - Report catalogue keys naming products missing from the catalogue (exits 1 if any)"
-	@echo "  make catalog-key-repair    - Clear those keys and refresh their search rows"
-
+	@echo "  make catalog-key-check     - Audit catalogue keys and reserved TDZ- SKUs (exits 1 if anything is found)"
+	@echo "  make catalog-key-repair    - Clear unknown keys, rename reserved SKUs, refresh their search rows"
+	@echo "  make catalog-item-sync     - Report missing or outdated canonical products for search (exits 1 if any)"
+	@echo "  make catalog-item-sync-apply - Write them from the catalogue and hand-made products"
 # Generate Swagger docs from code annotations
 swagger:
 	@echo "Generating Swagger documentation..."
@@ -103,16 +104,26 @@ availability-check:
 availability-backfill:
 	@go run ./cmd/availability-sync -apply
 
-# Report catalogue keys (todayz:<productId>) naming products that aren't in the
-# MongoDB catalogue (exits 1 if any)
+# Audit catalogue identity: keys (todayz:<productId>) naming products missing
+# from the MongoDB catalogue, keyed variants whose name doesn't match the
+# catalogue, and hand-made products still using a TDZ- SKU (exits 1 if any).
 catalog-key-check:
 	@go run ./cmd/catalog-key-check
 
-# Clear those keys so each product forms its own search group; its search rows
-# are refreshed in the same transaction. Safe while the API is serving.
+# Clear unknown keys and rename reserved SKUs to MANUAL-<sku>; search rows are
+# refreshed in the same transaction. Name mismatches are only reported; add
+# them with: go run ./cmd/catalog-key-check -apply -include-name-mismatches
 catalog-key-repair:
 	@go run ./cmd/catalog-key-check -apply
 
+# Report catalog_item rows (the canonical product customer search shows) that
+# are missing or differ from the catalogue / hand-made product (exits 1 if any)
+catalog-item-sync:
+	@go run ./cmd/catalog-item-sync
+
+# Write them. Run after a deploy and after every catalogue upload.
+catalog-item-sync-apply:
+	@go run ./cmd/catalog-item-sync -apply
 # Run the application locally against the production database
 run-prod:
 	@if [ ! -f .env.production ]; then \
