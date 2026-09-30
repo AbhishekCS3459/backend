@@ -4,9 +4,11 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/httputil"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/middleware"
+	"github.com/AbhishekCS3459/find-me-backend/internal/platform/realtime"
 	"github.com/AbhishekCS3459/find-me-backend/internal/storeaccess"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -20,10 +22,40 @@ const (
 
 type Handler struct {
 	svc Service
+	hub *realtime.Hub
 }
 
-func NewHandler(svc Service) *Handler {
-	return &Handler{svc: svc}
+// NewHandler serves inventory endpoints; hub carries the live change events.
+func NewHandler(svc Service, hub *realtime.Hub) *Handler {
+	return &Handler{svc: svc, hub: hub}
+}
+
+// Events streams a "change" event whenever the store's products or stock
+// change, so open screens reload instead of polling.
+func (h *Handler) Events(w http.ResponseWriter, r *http.Request) {
+	userID, storeID, ok := storeIDs(w, r)
+	if !ok {
+		return
+	}
+	if err := h.svc.CanWatch(r.Context(), userID, storeID); err != nil {
+		writeErr(w, err, userID, "failed to open inventory events")
+		return
+	}
+	updates, unsubscribe, err := h.hub.Subscribe(storeID.String())
+	if err != nil {
+		w.Header().Set("Retry-After", "30")
+		httputil.WriteError(w, http.StatusServiceUnavailable, "live updates are busy; try again shortly")
+		return
+	}
+	defer unsubscribe()
+	realtime.Stream(w, r, h.hub, updates, realtime.DefaultStreamOptions())
+}
+
+// IsEventsRequest reports whether r opens an inventory event stream, which
+// outlives the usual request timeout.
+func IsEventsRequest(r *http.Request) bool {
+	return r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/stores/") &&
+		strings.HasSuffix(r.URL.Path, "/inventory/events")
 }
 
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {

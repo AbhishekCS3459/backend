@@ -31,7 +31,7 @@ var (
 const openingStockNote = "Opening stock when added to the store"
 
 type Repository interface {
-	ListStoreProducts(ctx context.Context, storeID uuid.UUID, query, status string) ([]Listing, error)
+	ListStoreProducts(ctx context.Context, storeID uuid.UUID, filter ListFilter) ([]Listing, error)
 	StoreStats(ctx context.Context, storeID uuid.UUID) (*StoreSummary, error)
 	ListCatalog(ctx context.Context, retailerID, storeID uuid.UUID, query string) ([]CatalogItem, error)
 	AddListing(ctx context.Context, actorID, retailerID, storeID uuid.UUID, req *AddRequest, available bool) (*Listing, error)
@@ -87,16 +87,20 @@ const listingSelect = `
 	WHERE i.store_id = ? AND i.unlisted_at IS NULL
 `
 
-func (r *repository) ListStoreProducts(ctx context.Context, storeID uuid.UUID, query, status string) ([]Listing, error) {
+func (r *repository) ListStoreProducts(ctx context.Context, storeID uuid.UUID, filter ListFilter) ([]Listing, error) {
 	sql := listingSelect
 	args := []interface{}{storeID}
-	if q := strings.TrimSpace(query); q != "" {
+	if len(filter.VariantIDs) > 0 {
+		sql += ` AND i.product_variant_id IN ?`
+		args = append(args, filter.VariantIDs)
+	}
+	if q := strings.TrimSpace(filter.Query); q != "" {
 		sql += ` AND (p.name ILIKE ? OR v.sku ILIKE ? OR COALESCE(b.name, '') ILIKE ?)`
 		like := "%" + q + "%"
 		args = append(args, like, like, like)
 	}
 	const available = `(i.on_hand_quantity - i.reserved_quantity)`
-	switch strings.ToLower(strings.TrimSpace(status)) {
+	switch strings.ToLower(strings.TrimSpace(filter.Status)) {
 	case "low":
 		sql += ` AND i.is_available = TRUE AND ` + available + ` > 0 AND ` + available + ` <= i.low_stock_threshold`
 	case "out":

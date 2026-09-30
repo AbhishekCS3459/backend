@@ -7,6 +7,7 @@ func (h *Handler) Routes() chi.Router {
 	r := chi.NewRouter()
 	r.Post("/receive", h.ReceiveBatch)
 	r.Post("/sell", h.SellBatch)
+	r.Get("/events", h.Events)
 	r.Get("/{variantID}", h.Get)
 	r.Post("/{variantID}/receive", h.Receive)
 	r.Post("/{variantID}/sell", h.Sell)

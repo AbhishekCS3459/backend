@@ -20,7 +20,6 @@ const untitledStore = "Untitled store"
 var (
 	ErrNoRetailer         = errors.New("complete the retailer profile before managing stores")
 	ErrNotOwner           = errors.New("only the store owner can change store details and setup")
-	ErrOnboardingComplete = errors.New("this store's setup is already complete")
 	ErrNameTooLong        = errors.New("store name must be at most 255 characters")
 	ErrBankIncomplete     = errors.New("enter the account holder, account number and IFSC, or upload a payment QR")
 	ErrLocationNotSet     = errors.New("this store's location isn't set yet")
@@ -42,7 +41,8 @@ type Service interface {
 	NewOnboarding(ctx context.Context, userID uuid.UUID) (*progress.View, error)
 	Onboarding(ctx context.Context, userID, storeID uuid.UUID) (*progress.View, error)
 	// SaveOnboarding stores the draft. With Submitted set it completes the store,
-	// or returns *IncompleteError naming the first unfinished step.
+	// or returns *IncompleteError naming the first unfinished step. A completed
+	// store stays completed, so an edit that leaves a step unfinished is refused.
 	SaveOnboarding(ctx context.Context, userID, storeID uuid.UUID, draft progress.Draft) (*progress.View, error)
 	// SaveBank sets where this store is paid; it can change after setup is complete.
 	SaveBank(ctx context.Context, userID, storeID uuid.UUID, req *SaveBankRequest) (*progress.View, error)
@@ -205,13 +205,11 @@ func (s *service) Onboarding(ctx context.Context, userID, storeID uuid.UUID) (*p
 		return nil, err
 	}
 	draft := decodeDraft(*store)
-	if store.OnboardingStatus != OnboardingCompleted {
-		profile, err := s.retailerProfile(ctx, userID)
-		if err != nil {
-			return nil, err
-		}
-		applyRetailer(&draft, profile)
+	profile, err := s.retailerProfile(ctx, userID)
+	if err != nil {
+		return nil, err
 	}
+	applyRetailer(&draft, profile)
 	if err := s.applySaved(ctx, storeID, &draft); err != nil {
 		return nil, err
 	}
@@ -241,30 +239,30 @@ func (s *service) SaveOnboarding(
 
 	submit := draft.Submitted
 	draft.Submitted = false
-	if submit {
-		if incomplete := firstIncomplete(draft); incomplete != nil {
-			return nil, incomplete
-		}
-		draft.Submitted = true
-	}
-	persisted := draft
-	persisted.Bank = progress.Bank{}
-	persisted.Shipping.Lat, persisted.Shipping.Lng = nil, nil
-	payload, err := json.Marshal(persisted)
-	if err != nil {
-		return nil, err
-	}
 
 	store, err := s.repo.UpdateLocked(ctx, storeID, func(store *Store) error {
-		if store.OnboardingStatus == OnboardingCompleted {
-			return ErrOnboardingComplete
+		// A live store can be edited, but never back into an unfinished setup.
+		live := store.OnboardingStatus == OnboardingCompleted
+		if submit || live {
+			if incomplete := firstIncomplete(draft); incomplete != nil {
+				incomplete.Live = live
+				return incomplete
+			}
+			draft.Submitted = true
+		}
+		persisted := draft
+		persisted.Bank = progress.Bank{}
+		persisted.Shipping.Lat, persisted.Shipping.Lng = nil, nil
+		payload, err := json.Marshal(persisted)
+		if err != nil {
+			return err
 		}
 		// The store keeps its last usable name while the field is being edited.
 		if utf8.RuneCountInString(name) >= 2 {
 			store.Name = name
 		}
 		store.OnboardingData = payload
-		if submit {
+		if submit && !live {
 			now := time.Now().UTC()
 			store.OnboardingStatus = OnboardingCompleted
 			store.OnboardingCompletedAt = &now

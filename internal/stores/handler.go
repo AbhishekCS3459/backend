@@ -237,8 +237,6 @@ func writeServiceError(w http.ResponseWriter, err error, userID uuid.UUID, fallb
 		httputil.WriteError(w, http.StatusForbidden, err.Error())
 	case errors.Is(err, ErrLocationIncomplete):
 		httputil.WriteError(w, http.StatusBadRequest, err.Error())
-	case errors.Is(err, ErrOnboardingComplete):
-		httputil.WriteError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, ErrNameTooLong), errors.Is(err, ErrBankIncomplete):
 		httputil.WriteError(w, http.StatusBadRequest, err.Error())
 	case errors.As(err, &incomplete):

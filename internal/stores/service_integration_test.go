@@ -169,8 +169,23 @@ func TestEachStoreHasItsOwnOnboarding(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, progress.StatusCompleted, view.Status)
 
-	_, err = svc.SaveOnboarding(ctx, userID, first.ID, ready)
-	assert.ErrorIs(t, err, ErrOnboardingComplete, "a completed setup can't be reopened")
+	edited := completeDraft("First Store Renamed")
+	edited.Brand.Name = "New Brand"
+	view, err = svc.SaveOnboarding(ctx, userID, first.ID, edited)
+	require.NoError(t, err, "a completed store can still be edited")
+	assert.Equal(t, progress.StatusCompleted, view.Status, "editing never reopens setup")
+	assert.Equal(t, "New Brand", view.Data.Brand.Name)
+
+	broken := completeDraft("First Store Renamed")
+	broken.Brand.Name = ""
+	_, err = svc.SaveOnboarding(ctx, userID, first.ID, broken)
+	require.ErrorAs(t, err, &incomplete, "an edit can't leave a live store's step unfinished")
+	assert.Equal(t, "brand_details", incomplete.Step)
+	assert.Contains(t, err.Error(), "before saving this store")
+	view, err = svc.Onboarding(ctx, userID, first.ID)
+	require.NoError(t, err)
+	assert.Equal(t, progress.StatusCompleted, view.Status)
+	assert.Equal(t, "New Brand", view.Data.Brand.Name, "a refused edit changes nothing")
 
 	second, err := svc.Create(ctx, userID, &CreateRequest{Name: "Second Store"})
 	require.NoError(t, err, "finishing one store never blocks the next")

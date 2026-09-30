@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/AbhishekCS3459/find-me-backend/internal/availability"
+	"github.com/AbhishekCS3459/find-me-backend/internal/platform/realtime"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
@@ -15,10 +16,23 @@ import (
 // Ledger applies inventory changes inside a transaction owned by the caller,
 // so other modules (e.g. adding a product with opening stock) can combine
 // their own writes with stock changes atomically. Every write also refreshes
-// the product's customer search row in that transaction.
+// the product's customer search row and announces the change to the store's
+// live screens, both in that transaction.
 type Ledger struct{}
 
 func NewLedger() *Ledger { return &Ledger{} }
+
+// ChangesChannel is the PostgreSQL NOTIFY channel for inventory changes; the
+// payload is the store ID.
+const ChangesChannel = "inventory_changed"
+
+// changed runs after every write to an inventory row, inside its transaction.
+func changed(tx *gorm.DB, row *inventoryRow) error {
+	if err := availability.RefreshInventory(tx, row.ID); err != nil {
+		return err
+	}
+	return realtime.Notify(tx, ChangesChannel, row.StoreID.String())
+}
 
 type inventoryRow struct {
 	ID                uuid.UUID
@@ -120,7 +134,7 @@ func (Ledger) List(tx *gorm.DB, in ListInput) (Item, error) {
 		if err != nil {
 			return Item{}, fmt.Errorf("list product: %w", err)
 		}
-		if err := availability.RefreshInventory(tx, row.ID); err != nil {
+		if err := changed(tx, row); err != nil {
 			return Item{}, err
 		}
 		return row.item(), nil
@@ -137,7 +151,7 @@ func (Ledger) List(tx *gorm.DB, in ListInput) (Item, error) {
 	if err != nil {
 		return Item{}, fmt.Errorf("relist product: %w", err)
 	}
-	if err := availability.RefreshInventory(tx, row.ID); err != nil {
+	if err := changed(tx, row); err != nil {
 		return Item{}, err
 	}
 	row.UnlistedAt, row.LowStockThreshold, row.IsAvailable, row.UpdatedAt = nil, in.LowStockThreshold, in.IsAvailable, now
@@ -163,7 +177,7 @@ func (Ledger) Unlist(tx *gorm.DB, storeID, variantID uuid.UUID) error {
 	if err := tx.Exec(`UPDATE inventory SET unlisted_at = ?, updated_at = ? WHERE id = ?`, now, now, row.ID).Error; err != nil {
 		return fmt.Errorf("unlist product: %w", err)
 	}
-	return availability.RefreshInventory(tx, row.ID)
+	return changed(tx, row)
 }
 
 // UpdateSettings changes listing options; it never touches stock.
@@ -196,7 +210,7 @@ func (Ledger) UpdateSettings(tx *gorm.DB, storeID, variantID uuid.UUID, s Settin
 	if err != nil {
 		return Item{}, fmt.Errorf("update listing settings: %w", err)
 	}
-	if err := availability.RefreshInventory(tx, row.ID); err != nil {
+	if err := changed(tx, row); err != nil {
 		return Item{}, err
 	}
 	return row.item(), nil
@@ -316,19 +330,21 @@ func (Ledger) record(tx *gorm.DB, row *inventoryRow, c change, meta entryMeta) (
 		entry.CreatedBy = &actor
 		createdBy = &actor.ID
 	}
+	// A sale keeps the store's price at that moment, so sales reports don't change with later prices.
 	err = tx.Exec(`
 		INSERT INTO inventory_transaction (
 			id, inventory_id, store_id, product_variant_id, type, reason, quantity,
 			before_on_hand, after_on_hand, before_reserved, after_reserved, counted_quantity,
-			reference, note, batch_id, created_by, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			reference, note, batch_id, created_by, created_at, unit_price
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+			(SELECT price FROM inventory WHERE id = ? AND ?::text = 'OFFLINE_SALE'))`,
 		entry.ID, row.ID, row.StoreID, row.ProductVariantID, entry.Type, entry.Reason, entry.Quantity,
 		entry.BeforeOnHand, entry.AfterOnHand, entry.BeforeReserved, entry.AfterReserved, entry.CountedQuantity,
-		entry.Reference, entry.Note, entry.BatchID, createdBy, entry.CreatedAt).Error
+		entry.Reference, entry.Note, entry.BatchID, createdBy, entry.CreatedAt, row.ID, entry.Type).Error
 	if err != nil {
 		return Result{}, fmt.Errorf("record inventory transaction: %w", err)
 	}
-	if err := availability.RefreshInventory(tx, row.ID); err != nil {
+	if err := changed(tx, row); err != nil {
 		return Result{}, err
 	}
 

@@ -28,6 +28,8 @@ type Service interface {
 	Count(ctx context.Context, userID, storeID, variantID uuid.UUID, key string, req *CountRequest) (*Result, bool, error)
 	Adjust(ctx context.Context, userID, storeID, variantID uuid.UUID, key string, req *AdjustRequest) (*Result, bool, error)
 	History(ctx context.Context, userID, storeID, variantID uuid.UUID, cursor string, limit int) (*HistoryPage, error)
+	// CanWatch returns nil if the caller may follow the store's inventory changes.
+	CanWatch(ctx context.Context, userID, storeID uuid.UUID) error
 }
 
 type service struct {
@@ -38,6 +40,11 @@ type service struct {
 
 func NewService(db *gorm.DB, access storeaccess.Resolver, ledger *Ledger) Service {
 	return &service{db: db, access: access, ledger: ledger}
+}
+
+func (s *service) CanWatch(ctx context.Context, userID, storeID uuid.UUID) error {
+	_, err := s.access.Require(ctx, userID, storeID, storeaccess.InventoryView)
+	return err
 }
 
 func (s *service) Get(ctx context.Context, userID, storeID, variantID uuid.UUID) (*Item, error) {

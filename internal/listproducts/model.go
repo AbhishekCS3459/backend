@@ -89,6 +89,18 @@ type Category struct {
 
 func (Category) TableName() string { return "category" }
 
+// MaxListVariantIDs matches the most lines a counter bill can have.
+const MaxListVariantIDs = 200
+
+// ListFilter narrows a store's product list. VariantIDs keeps only those
+// products, so a counter can recheck the items in an open order; a product
+// removed from the store is simply missing from the result.
+type ListFilter struct {
+	Query      string
+	Status     string
+	VariantIDs []uuid.UUID
+}
+
 type Listing struct {
 	InventoryID       uuid.UUID `json:"inventory_id"`
 	ProductID         uuid.UUID `json:"product_id"`

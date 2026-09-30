@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/AbhishekCS3459/find-me-backend/internal/analytics"
 	"github.com/AbhishekCS3459/find-me-backend/internal/catalog"
 	"github.com/AbhishekCS3459/find-me-backend/internal/identity"
 	"github.com/AbhishekCS3459/find-me-backend/internal/identity/progress"
@@ -16,6 +17,7 @@ import (
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/health"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/middleware"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/mongodb"
+	"github.com/AbhishekCS3459/find-me-backend/internal/platform/realtime"
 	"github.com/AbhishekCS3459/find-me-backend/internal/productcatalog"
 	"github.com/AbhishekCS3459/find-me-backend/internal/storeaccess"
 	"github.com/AbhishekCS3459/find-me-backend/internal/stores"
@@ -32,19 +34,21 @@ import (
 
 // SetupRoutes configures all HTTP routes (exported for testing).
 // mongoClient may be nil; catalogue endpoints then respond 503.
-func SetupRoutes(db *database.DB, mongoClient *mongodb.Client, cfg *Config) *chi.Mux {
+// hub carries live inventory changes to open event streams.
+func SetupRoutes(db *database.DB, mongoClient *mongodb.Client, cfg *Config, hub *realtime.Hub) *chi.Mux {
 	router := chi.NewRouter()
 
 	// Middleware stack (order matters!)
-	router.Use(chiMiddleware.RequestID)                 // Add request ID
-	router.Use(chiMiddleware.RealIP)                    // Get real IP from X-Forwarded-For
-	router.Use(middleware.SecurityHeaders)              // Security headers (X-Frame-Options, CSP, etc.)
-	router.Use(middleware.BodyLimit(1 << 20))           // Limit request body to 1MB (DoS protection)
-	router.Use(middleware.Metrics)                      // Prometheus metrics collection
-	router.Use(middleware.SimpleRequestLogger)          // Structured request logging
-	router.Use(middleware.Recoverer)                    // Panic recovery with stack traces
-	router.Use(chiMiddleware.Compress(5))               // Response compression
-	router.Use(chiMiddleware.Timeout(60 * time.Second)) // Request timeout
+	router.Use(chiMiddleware.RequestID)        // Add request ID
+	router.Use(chiMiddleware.RealIP)           // Get real IP from X-Forwarded-For
+	router.Use(middleware.SecurityHeaders)     // Security headers (X-Frame-Options, CSP, etc.)
+	router.Use(middleware.BodyLimit(1 << 20))  // Limit request body to 1MB (DoS protection)
+	router.Use(middleware.Metrics)             // Prometheus metrics collection
+	router.Use(middleware.SimpleRequestLogger) // Structured request logging
+	router.Use(middleware.Recoverer)           // Panic recovery with stack traces
+	router.Use(chiMiddleware.Compress(5))      // Response compression
+	// Request timeout; event streams end on their own (see realtime.StreamOptions).
+	router.Use(middleware.TimeoutExcept(60*time.Second, inventory.IsEventsRequest))
 
 	corsConfig := &middleware.CORSConfig{
 		AllowedOrigins: append([]string{
@@ -95,11 +99,14 @@ func SetupRoutes(db *database.DB, mongoClient *mongodb.Client, cfg *Config) *chi
 	productCatalogHandler := productcatalog.NewHandler(productCatalogService)
 
 	inventoryLedger := inventory.NewLedger()
-	inventoryHandler := inventory.NewHandler(inventory.NewService(db.Gorm, storeAccess, inventoryLedger))
+	inventoryHandler := inventory.NewHandler(inventory.NewService(db.Gorm, storeAccess, inventoryLedger), hub)
 	listProductsService := listproducts.NewService(
 		listproducts.NewRepository(db.Gorm, inventoryLedger), storeAccess, productCatalogService,
 	)
 	listProductsHandler := listproducts.NewHandler(listProductsService)
+	analyticsHandler := analytics.NewHandler(
+		analytics.NewService(analytics.NewRepository(db.Gorm), storeAccess, cfg.MarketplaceStaleAfter),
+	)
 	teamHandler := team.NewHandler(team.NewService(team.NewRepository(db.Gorm), storeAccess))
 	truecallerHandler := truecaller.NewHandler(truecaller.NewService(truecaller.NewStore(cfg.RedisURL), userService))
 	marketplaceHandler := marketplace.NewHandler(
@@ -147,6 +154,9 @@ func SetupRoutes(db *database.DB, mongoClient *mongodb.Client, cfg *Config) *chi
 		})
 		r.Route("/stores/{storeID}/inventory", func(r chi.Router) {
 			r.Mount("/", inventoryHandler.Routes())
+		})
+		r.Route("/stores/{storeID}/analytics", func(r chi.Router) {
+			r.Mount("/", analyticsHandler.Routes())
 		})
 		r.Mount("/stores", storeHandler.Routes())
 		r.Mount("/team", teamHandler.Routes())

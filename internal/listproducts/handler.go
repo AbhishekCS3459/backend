@@ -1,7 +1,10 @@
 package listproducts
 
 import (
+	"errors"
+	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/httputil"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/middleware"
@@ -23,15 +26,43 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	rows, stats, err := h.svc.List(r.Context(), userID, storeID, r.URL.Query().Get("q"), r.URL.Query().Get("status"))
+	query := r.URL.Query()
+	variantIDs, err := parseVariantIDs(query.Get("variant_ids"))
+	if err != nil {
+		httputil.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	rows, stats, err := h.svc.List(r.Context(), userID, storeID, ListFilter{
+		Query: query.Get("q"), Status: query.Get("status"), VariantIDs: variantIDs,
+	})
 	if err != nil {
 		h.writeErr(w, err, userID.String(), "failed to list store products")
 		return
 	}
-	httputil.WriteJSON(w, http.StatusOK, map[string]interface{}{
+	httputil.WriteJSONWithETag(w, r, map[string]interface{}{
 		"products": rows,
 		"summary":  stats,
 	})
+}
+
+// parseVariantIDs reads a comma-separated list of variant ids.
+func parseVariantIDs(raw string) ([]uuid.UUID, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	parts := strings.Split(raw, ",")
+	if len(parts) > MaxListVariantIDs {
+		return nil, fmt.Errorf("variant_ids can list at most %d products", MaxListVariantIDs)
+	}
+	ids := make([]uuid.UUID, 0, len(parts))
+	for _, part := range parts {
+		id, err := uuid.Parse(strings.TrimSpace(part))
+		if err != nil {
+			return nil, errors.New("variant_ids must be comma-separated variant ids")
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
 }
 
 func (h *Handler) Catalog(w http.ResponseWriter, r *http.Request) {

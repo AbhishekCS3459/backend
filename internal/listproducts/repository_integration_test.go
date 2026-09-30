@@ -110,9 +110,13 @@ func TestListingLifecycleGoesThroughLedger(t *testing.T) {
 	assert.ErrorIs(t, err, inventory.ErrAlreadyListed)
 
 	require.NoError(t, repo.RemoveListing(ctx, storeID, created.VariantID))
-	listed, err := repo.ListStoreProducts(ctx, storeID, "", "")
+	listed, err := repo.ListStoreProducts(ctx, storeID, ListFilter{})
 	require.NoError(t, err)
 	assert.Empty(t, listed, "removed products are hidden from the store list")
+	byID := ListFilter{VariantIDs: []uuid.UUID{created.VariantID, uuid.New()}}
+	listed, err = repo.ListStoreProducts(ctx, storeID, byID)
+	require.NoError(t, err)
+	assert.Empty(t, listed, "an open order rechecking a removed product finds nothing")
 	stats, err := repo.StoreStats(ctx, storeID)
 	require.NoError(t, err)
 	assert.Equal(t, 0, stats.ProductCount)
@@ -132,6 +136,11 @@ func TestListingLifecycleGoesThroughLedger(t *testing.T) {
 	assert.Equal(t, 15, relisted.OnHand, "re-adding restores kept stock plus the new opening quantity")
 	assert.Equal(t, "low", relisted.StockStatus)
 	assert.Len(t, history(), 2)
+	listed, err = repo.ListStoreProducts(ctx, storeID, byID)
+	require.NoError(t, err)
+	require.Len(t, listed, 1, "only the requested products that are still listed come back")
+	assert.Equal(t, created.VariantID, listed[0].VariantID)
+	assert.Equal(t, 15, listed[0].Available)
 
 	off := false
 	updated, err := repo.UpdateListing(ctx, storeID, created.VariantID, &UpdateRequest{IsAvailable: &off})

@@ -30,7 +30,7 @@ const (
 )
 
 type Service interface {
-	List(ctx context.Context, userID, storeID uuid.UUID, query, status string) ([]Listing, *StoreSummary, error)
+	List(ctx context.Context, userID, storeID uuid.UUID, filter ListFilter) ([]Listing, *StoreSummary, error)
 	Catalog(ctx context.Context, userID, storeID uuid.UUID, query string) ([]CatalogItem, error)
 	Add(ctx context.Context, userID, storeID uuid.UUID, req *AddRequest) (*Listing, error)
 	Create(ctx context.Context, userID, storeID uuid.UUID, req *CreateProductRequest) (*Listing, error)
@@ -60,11 +60,11 @@ func (s *service) authorize(
 	return access.RetailerID, nil
 }
 
-func (s *service) List(ctx context.Context, userID, storeID uuid.UUID, query, status string) ([]Listing, *StoreSummary, error) {
+func (s *service) List(ctx context.Context, userID, storeID uuid.UUID, filter ListFilter) ([]Listing, *StoreSummary, error) {
 	if _, err := s.authorize(ctx, userID, storeID, storeaccess.InventoryView); err != nil {
 		return nil, nil, err
 	}
-	rows, err := s.repo.ListStoreProducts(ctx, storeID, query, status)
+	rows, err := s.repo.ListStoreProducts(ctx, storeID, filter)
 	if err != nil {
 		return nil, nil, err
 	}

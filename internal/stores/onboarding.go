@@ -9,14 +9,20 @@ import (
 	"github.com/AbhishekCS3459/find-me-backend/internal/identity/retailer"
 )
 
-// IncompleteError rejects a submission while a required step is unfinished.
+// IncompleteError rejects a submission, or an edit to a live store, while a
+// required step is unfinished.
 type IncompleteError struct {
 	Step    string
 	Missing []string
+	Live    bool
 }
 
 func (e *IncompleteError) Error() string {
-	msg := fmt.Sprintf("finish %s before submitting this store", progress.StepLabel(e.Step))
+	action := "submitting"
+	if e.Live {
+		action = "saving"
+	}
+	msg := fmt.Sprintf("finish %s before %s this store", progress.StepLabel(e.Step), action)
 	if len(e.Missing) > 0 {
 		msg += ": " + strings.Join(e.Missing, " ")
 	}

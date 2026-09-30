@@ -412,3 +412,590 @@ internal/
   support/        → support_ticket, evidence
   verification/   → verification_request
 ```
+Yes. **For your current Find Me use case, this is a correct and well-designed approach.** I would **not replace it with Redis/Kafka just because you're concerned about scale**.
+
+The important distinction is that your system is using PostgreSQL `LISTEN/NOTIFY` as a **change signal**, not as the source of truth or a durable event queue. That is a very reasonable use of `NOTIFY`.
+
+### What you have now
+
+```text
+Inventory write
+     │
+     ▼
+Postgres transaction
+ ┌───────────────────────┐
+ │ update inventory      │
+ │ refresh availability  │
+ │ pg_notify(store_id)   │
+ └───────────┬───────────┘
+             │
+        commit succeeds
+             │
+             ▼
+      API instance LISTEN
+             │
+             ▼
+           Hub
+             │
+             ▼
+          SSE clients
+             │
+             ▼
+       reload inventory
+             │
+             ▼
+        GET /products
+```
+
+That's fundamentally sound.
+
+## The biggest thing you're doing right
+
+You're **not trying to send the actual inventory state through `NOTIFY`**.
+
+You're effectively saying:
+
+> "Something in store X changed. Re-read the authoritative state."
+
+That's exactly the safer way to use PostgreSQL notifications.
+
+Your flow:
+
+```text
+NOTIFY → "change happened"
+GET /products → "what is the current truth?"
+```
+
+is much better than:
+
+```text
+NOTIFY → "stock is now 7"
+```
+
+because the latter creates synchronization problems.
+
+---
+
+# Pros of your current approach
+
+### 1. Very simple architecture
+
+You don't need:
+
+```text
+Postgres
+   ↓
+Kafka
+   ↓
+Consumer
+   ↓
+Redis
+   ↓
+WebSocket
+```
+
+You have:
+
+```text
+Postgres
+   ↓
+LISTEN
+   ↓
+SSE
+```
+
+For your current system, that's significantly easier to operate.
+
+---
+
+### 2. Strong consistency
+
+This part is excellent:
+
+```go
+changed(tx, row)
+```
+
+inside the transaction.
+
+Postgres guarantees that the `NOTIFY` becomes visible only if the transaction commits.
+
+So you don't get:
+
+```text
+inventory update failed
+       +
+notification says it succeeded
+```
+
+That is an important property.
+
+---
+
+### 3. Works across API instances
+
+This is another thing you got right.
+
+Suppose:
+
+```text
+Device A
+   ↓
+API-1
+```
+
+and:
+
+```text
+Device B
+   ↓
+API-2
+```
+
+Sale happens through API-1:
+
+```text
+API-1
+ ↓
+Postgres
+ ↓
+NOTIFY
+ ↓
+API-2 LISTEN
+ ↓
+SSE
+ ↓
+Device B
+```
+
+So you aren't accidentally limiting realtime updates to the API process that performed the write.
+
+---
+
+### 4. SSE is a good fit
+
+Your requirement is primarily:
+
+```text
+Server → browser
+```
+
+You don't need bidirectional communication for inventory synchronization.
+
+So:
+
+```text
+SSE
+```
+
+is a good choice.
+
+You don't need WebSockets merely because it's "more realtime."
+
+---
+
+### 5. Your fallback strategy is excellent
+
+This is actually one of the strongest parts of the design.
+
+You have:
+
+```text
+Live event
+   ↓
+reload
+
+if live connection unavailable
+   ↓
+15 sec fallback
+
+tab becomes visible
+   ↓
+reload
+
+browser comes online
+   ↓
+reload
+
+reconnect
+   ↓
+reload
+```
+
+That means your application doesn't fundamentally depend on realtime delivery.
+
+That's exactly how I'd want this designed.
+
+---
+
+### 6. ETag makes the fallback cheap
+
+This:
+
+```text
+GET /products
+If-None-Match: <etag>
+```
+
+means:
+
+```text
+Nothing changed
+      ↓
+304
+      ↓
+no response body
+```
+
+So your fallback polling isn't nearly as expensive as repeatedly downloading the entire catalog.
+
+---
+
+### 7. Server-side checkout validation is critical
+
+This is probably the most important correctness feature:
+
+> "even if a screen is momentarily stale, the server locks rows, rejects overselling, and rejects removed products at checkout."
+
+That means your architecture doesn't rely on realtime synchronization for correctness.
+
+You have:
+
+```text
+UI realtime sync
+       ↓
+better UX
+
+Postgres transaction
+       ↓
+actual correctness
+```
+
+Perfect separation.
+
+---
+
+# The main weakness: `LISTEN/NOTIFY` is not durable
+
+This is the one thing you need to understand very clearly.
+
+Imagine:
+
+```text
+API-2
+  │
+  │ LISTEN
+  │
+  X disconnected
+```
+
+Then:
+
+```text
+API-1 → Postgres → NOTIFY
+```
+
+If API-2 isn't listening at that moment, it doesn't get a durable copy of the notification.
+
+But **your architecture already mitigates this** because:
+
+```text
+reconnect
+   ↓
+reload
+```
+
+and:
+
+```text
+fallback polling
+   ↓
+reload
+```
+
+So a missed notification means:
+
+> "The UI may be stale temporarily."
+
+It does **not** mean:
+
+> "We lost inventory data."
+
+That's an important distinction.
+
+---
+
+# The other limitation: PostgreSQL notification scaling
+
+`LISTEN/NOTIFY` is great for:
+
+```text
+small/moderate number of API instances
+```
+
+and relatively low-frequency change signals.
+
+Your design has:
+
+```text
+1 LISTEN connection / API instance
+```
+
+which is very reasonable.
+
+Suppose you eventually have:
+
+```text
+10 API instances
+```
+
+you'd have approximately:
+
+```text
+10 PostgreSQL LISTEN connections
+```
+
+That's trivial.
+
+Even:
+
+```text
+50 API instances
+```
+
+isn't inherently scary.
+
+The concern starts when you're using PostgreSQL as a **high-volume messaging infrastructure**, e.g.:
+
+```text
+millions of notifications
+thousands of consumers
+large payloads
+durable event processing
+complex event fan-out
+```
+
+That's not what you're doing.
+
+You're sending:
+
+```text
+storeID
+```
+
+and then doing:
+
+```text
+GET /products
+```
+
+So your notification payload is tiny.
+
+---
+
+# One thing I'd reconsider
+
+You said:
+
+> "Every stock or product change is saved through one place on the server (the inventory ledger), which announces it."
+
+I'd make sure that **every mutation that can affect the customer-facing result actually goes through the same transactional mechanism**.
+
+For example:
+
+```text
+Sale                 → notify
+Receive stock        → notify
+Adjustment           → notify
+Remove product       → notify
+Re-add product       → notify
+Availability change  → notify
+Threshold change     → notify
+Price change         → notify?
+Product name change  → notify?
+Product image change → notify?
+```
+
+You've already noted that name/image edits don't trigger the inventory notification and rely on the 60-second fallback.
+
+That's acceptable **if that's intentional**.
+
+But I'd probably separate the concepts:
+
+```text
+inventory_changed
+catalog_changed
+```
+
+rather than making inventory notification responsible for everything.
+
+For example:
+
+```text
+inventory_changed
+    → stock / availability / store-product status
+
+catalog_changed
+    → name / image / category / metadata
+```
+
+Then the UI can decide what needs refreshing.
+
+---
+
+# One optimization I'd consider later
+
+Currently:
+
+```text
+stock of Product A changes
+        ↓
+store changed
+        ↓
+every screen reloads /products
+```
+
+That's perfectly fine initially.
+
+But imagine a store has:
+
+```text
+20,000 products
+```
+
+and:
+
+```text
+200 staff screens
+```
+
+One stock update could result in many:
+
+```text
+GET /products
+```
+
+requests.
+
+ETag reduces the payload, but the requests still hit your application/database/cache layer.
+
+At that point, I'd evolve the event from:
+
+```json
+{
+  "store_id": "123"
+}
+```
+
+to something like:
+
+```json
+{
+  "store_id": "123",
+  "product_id": "456",
+  "version": 8921
+}
+```
+
+Then the client can update only the affected product or request a much smaller delta.
+
+**But I would not implement that complexity yet unless profiling shows it's necessary.**
+
+---
+
+# Should you change to Redis/Kafka now?
+
+**No, not based on the architecture you've shown.**
+
+I'd keep:
+
+```text
+Postgres
+   │
+   ├── inventory state
+   ├── transactions
+   └── NOTIFY
+          ↓
+      API LISTENER
+          ↓
+         Hub
+          ↓
+         SSE
+          ↓
+       Browser
+```
+
+Your fallback and server-side validation make this architecture quite resilient.
+
+If Find Me grows significantly, the migration path is straightforward:
+
+### Current
+
+```text
+Postgres
+   ↓
+LISTEN/NOTIFY
+   ↓
+SSE
+```
+
+### Later
+
+```text
+Postgres
+   ↓
+Transactional Outbox
+   ↓
+Redis/Kafka
+   ↓
+SSE
+```
+
+You don't need to prematurely introduce Kafka.
+
+---
+
+# My assessment of your current design
+
+| Component                               | Assessment                                             |
+| --------------------------------------- | ------------------------------------------------------ |
+| PostgreSQL as inventory source of truth | ✅ Correct                                              |
+| Transactional inventory updates         | ✅ Correct                                              |
+| `LISTEN/NOTIFY` as change signal        | ✅ Good                                                 |
+| One LISTEN connection/API instance      | ✅ Good                                                 |
+| Store-level notification                | ✅ Good for now                                         |
+| SSE                                     | ✅ Good                                                 |
+| Hub per API instance                    | ✅ Good                                                 |
+| Reconnect                               | ✅ Important                                            |
+| Heartbeat                               | ✅ Important                                            |
+| 15s fallback                            | ✅ Good                                                 |
+| ETag                                    | ✅ Good                                                 |
+| Visibility/focus refresh                | ✅ Good                                                 |
+| BroadcastChannel                        | ✅ Nice optimization                                    |
+| Server-side checkout validation         | ⭐ Essential                                            |
+| Kafka                                   | ❌ Not needed yet                                       |
+| Redis Pub/Sub                           | ❌ Not necessary yet                                    |
+| Transactional outbox                    | ⚠️ Useful later if event reliability requirements grow |
+
+### Bottom line
+
+**I would keep your current architecture.**
+
+In fact, the design is better than simply doing:
+
+```text
+Postgres LISTEN → SSE
+```
+
+because you've added the important safety net:
+
+```text
+NOTIFY = optimization for freshness
+Postgres = source of truth
+checkout transaction = correctness
+fallback refresh = recovery from missed realtime events
+```
+
+That's the right mental model for your marketplace.
+
+The **first thing I'd change when scale demands it** isn't SSE. I'd replace the PostgreSQL notification layer with a **transactional outbox + Redis/Kafka**, while keeping your SSE layer and frontend synchronization model largely unchanged.

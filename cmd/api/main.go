@@ -16,9 +16,11 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/AbhishekCS3459/find-me-backend/internal/identity"
+	"github.com/AbhishekCS3459/find-me-backend/internal/inventory"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/database"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/mongodb"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/outbox"
+	"github.com/AbhishekCS3459/find-me-backend/internal/platform/realtime"
 )
 
 // @title           Find Me API
@@ -106,8 +108,12 @@ func run() error {
 	stopPublisher := startOutboxPublisher(db, cfg.OutboxPublisherEnabled)
 	defer stopPublisher()
 
+	hub := realtime.NewHub(maxLiveStreams)
+	stopListener := startInventoryListener(db, hub)
+	defer stopListener()
+
 	// Setup routes
-	router := SetupRoutes(db, mongoClient, cfg)
+	router := SetupRoutes(db, mongoClient, cfg, hub)
 
 	// Create HTTP server
 	server := &http.Server{
@@ -117,6 +123,8 @@ func run() error {
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
+	// Shutdown waits for open requests; event streams would otherwise hold it until its deadline.
+	server.RegisterOnShutdown(hub.Close)
 
 	// Start server in a goroutine
 	go func() {
@@ -164,6 +172,24 @@ func startOutboxPublisher(db *database.DB, enabled bool) (stop func()) {
 	go func() {
 		defer close(done)
 		publisher.Run(ctx)
+	}()
+	return func() {
+		cancel()
+		<-done
+	}
+}
+
+// maxLiveStreams caps the event streams one instance holds open.
+const maxLiveStreams = 10000
+
+// startInventoryListener relays inventory changes committed by any instance to
+// this instance's event streams, until the returned stop function is called.
+func startInventoryListener(db *database.DB, hub *realtime.Hub) (stop func()) {
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		realtime.Listen(ctx, db.Pool.Config().ConnConfig, inventory.ChangesChannel, hub)
 	}()
 	return func() {
 		cancel()

@@ -1,4 +1,4 @@
-.PHONY: help swagger swagger-serve build run run-prod run-dev dev stop lint lint-fix fmt vet test test-coverage test-utils bench-utils test-setup check migrate-up migrate-down migrate-create migrate-status docker-up docker-down docker-build monitoring-up monitoring-down clean catalog-indexes catalog-cleanup-preview catalog-prepare availability-check availability-backfill catalog-key-check catalog-key-repair catalog-item-sync catalog-item-sync-apply
+.PHONY: help swagger swagger-serve build run run-prod run-dev dev stop lint lint-fix fmt vet test test-coverage test-utils bench-utils test-setup check migrate-up migrate-down migrate-create migrate-status docker-up docker-down docker-build monitoring-up monitoring-down clean catalog-indexes catalog-cleanup-preview catalog-prepare availability-check availability-backfill catalog-key-check catalog-key-repair catalog-item-sync catalog-item-sync-apply db-copy-local-to-prod
 
 # Local development database 
 DEV_DATABASE_URL=postgresql://postgres:postgres@localhost:5434/find_me?sslmode=disable
@@ -30,6 +30,8 @@ help:
 	@echo "  make migrate-down     - Rollback last migration"
 	@echo "  make migrate-create   - Create a new migration (NAME=description)"
 	@echo "  make migrate-status   - Check migration status"
+	@echo "  make db-copy-local-to-prod - Replace PROD data with the local database (backs up PROD first)"
+	@echo "  make db-copy-local-to-prod RESTORE=tmp/db-backups/prod-<time>.dump - Put a PROD backup back"
 	@echo "  make docker-up        - Start Docker services"
 	@echo "  make docker-down      - Stop Docker services"
 	@echo "  make docker-build     - Build Docker image"
@@ -322,6 +324,10 @@ db-create:
 	@docker compose exec -T postgres psql -U postgres -tc "SELECT 1 FROM pg_database WHERE datname = 'find_me_test'" | grep -q 1 || \
 		docker compose exec -T postgres psql -U postgres -c "CREATE DATABASE find_me_test;"
 	@echo "✅ Databases find_me and find_me_test are ready"
+
+db-copy-local-to-prod:
+	@SOURCE_DATABASE_URL="$(DEV_DATABASE_URL)" PROD_DATABASE_URL="$(PROD_DATABASE_URL)" \
+		./scripts/db-copy-local-to-prod.sh $(if $(RESTORE),--restore "$(RESTORE)")
 
 seed:
 	@echo "Seeding $(DATABASE_URL)"
