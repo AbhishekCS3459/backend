@@ -13,8 +13,9 @@
 // Without -apply it only reports and exits 1 if anything is found. With -apply
 // it clears unknown keys (and, with -include-name-mismatches, mismatched ones)
 // and renames the reserved SKUs of products without a key to MANUAL-<sku>, so
-// they form their own search group and migration 000048 can validate. Search
-// rows are refreshed in the same transaction. Safe to run while the API serves.
+// they form their own search group and migration 000048 can validate. Their
+// catalog items and search rows are written in the same transaction. Safe to
+// run while the API serves.
 //
 //	go run ./cmd/catalog-key-check                                   # report only
 //	go run ./cmd/catalog-key-check -apply                            # repair unknown keys and reserved SKUs
@@ -43,6 +44,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/AbhishekCS3459/find-me-backend/internal/availability"
+	"github.com/AbhishekCS3459/find-me-backend/internal/catalogitem"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/database"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/mongodb"
 	"github.com/AbhishekCS3459/find-me-backend/internal/productcatalog"
@@ -70,7 +72,8 @@ type options struct {
 func main() {
 	var opts options
 	flag.BoolVar(&opts.apply, "apply", false, "repair what is found (default: report only)")
-	flag.BoolVar(&opts.nameMismatches, "include-name-mismatches", false, "with -apply, also clear keys whose name doesn't match the catalogue")
+	flag.BoolVar(&opts.nameMismatches, "include-name-mismatches", false,
+		"with -apply, also clear keys whose name doesn't match the catalogue")
 	flag.IntVar(&opts.batch, "batch", 500, "variants per catalogue lookup and transaction")
 	flag.Parse()
 	opts.batch = min(max(opts.batch, 1), 1000)
@@ -253,8 +256,9 @@ func checkReservedSKUs(ctx context.Context, db *gorm.DB, opts options, rep *repo
 }
 
 // repairVariants clears each variant's key and gives it a SKU outside the
-// reserved prefix, then rebuilds the variants' search rows, in one
-// transaction. A variant changed since it was read is left alone.
+// reserved prefix, then writes the variants' own catalog items and rebuilds
+// their search rows, in one transaction. A variant changed since it was read
+// is left alone.
 func repairVariants(ctx context.Context, db *gorm.DB, variants []variant, rep *report) error {
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		ids := make([]uuid.UUID, 0, len(variants))
@@ -280,6 +284,9 @@ func repairVariants(ctx context.Context, db *gorm.DB, variants []variant, rep *r
 				renamed++
 				log.Info().Str("variant_id", v.ID.String()).Str("from", v.SKU).Str("to", sku).Msg("renamed SKU")
 			}
+		}
+		if err := catalogitem.UpsertManual(tx, ids); err != nil {
+			return err
 		}
 		if err := availability.RefreshVariants(tx, ids); err != nil {
 			return err

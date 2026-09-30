@@ -59,6 +59,11 @@ type Config struct {
 	BootstrapAdminPhone    string
 }
 
+const (
+	environmentProduction = "production"
+	defaultJWTSecret      = "dev-secret-change-in-production"
+)
+
 // LoadConfig loads configuration from environment variables with validation
 func LoadConfig() (*Config, error) {
 	cfg := &Config{}
@@ -77,12 +82,14 @@ func LoadConfig() (*Config, error) {
 	cfg.MongoDBURL = getEnv("DATABASE_URL_MONGODB_PROD", "")
 	cfg.MongoCatalogDatabase = getEnv("MONGODB_CATALOG_DATABASE", "catalog")
 	cfg.MongoCatalogCollection = getEnv("MONGODB_CATALOG_COLLECTION", "products")
+	production := cfg.Environment == environmentProduction
+
 	// JWT - required in production, but has default for development
-	cfg.JWTSecret = getEnv("JWT_SECRET", "dev-secret-change-in-production")
-	if cfg.JWTSecret == "dev-secret-change-in-production" && cfg.Environment == "production" {
+	cfg.JWTSecret = getEnv("JWT_SECRET", defaultJWTSecret)
+	if cfg.JWTSecret == defaultJWTSecret && production {
 		return nil, fmt.Errorf("JWT_SECRET must be set in production environment")
 	}
-	if cfg.JWTSecret == "dev-secret-change-in-production" {
+	if cfg.JWTSecret == defaultJWTSecret {
 		fmt.Fprintf(os.Stderr, "WARNING: Using default JWT_SECRET. Change this in production!\n")
 	}
 
@@ -90,14 +97,14 @@ func LoadConfig() (*Config, error) {
 	cfg.APIAccessToken = getEnv("API_ACCESS_TOKEN", "")
 
 	// Rate Limiting (enabled by default in production)
-	cfg.RateLimitEnabled = getEnv("RATE_LIMIT_ENABLED", "true") == "true"
+	cfg.RateLimitEnabled = getEnvBool("RATE_LIMIT_ENABLED", true)
 	cfg.RateLimitRequestsPerSec = parseFloat(getEnv("RATE_LIMIT_REQUESTS_PER_SEC", "10.0"), 10.0)
 	cfg.RateLimitBurst = parseInt(getEnv("RATE_LIMIT_BURST", "20"), 20)
 
 	// Queue (optional - Redis URL for production, empty for in-memory in development)
 	cfg.QueueURL = getEnv("QUEUE_URL", "")
 	cfg.RedisURL = getEnv("REDIS_URL", cfg.QueueURL)
-	cfg.OutboxPublisherEnabled = getEnv("OUTBOX_PUBLISHER_ENABLED", "true") == "true"
+	cfg.OutboxPublisherEnabled = getEnvBool("OUTBOX_PUBLISHER_ENABLED", true)
 
 	for _, origin := range strings.Split(getEnv("CORS_ALLOWED_ORIGINS", ""), ",") {
 		if origin = strings.TrimSpace(origin); origin != "" {
@@ -107,8 +114,9 @@ func LoadConfig() (*Config, error) {
 
 	cfg.MarketplaceStaleAfter = parseDuration(getEnv("MARKETPLACE_STALE_AFTER", "336h"), 14*24*time.Hour)
 	// Never in production, whatever the flag says: debug mode exposes exact stock.
-	cfg.MarketplaceDebug = getEnv("DEBUG_MARKETPLACE", "false") == "true" && cfg.Environment != "production"
-	if getEnv("DEBUG_MARKETPLACE", "false") == "true" && cfg.Environment == "production" {
+	marketplaceDebug := getEnvBool("DEBUG_MARKETPLACE", false)
+	cfg.MarketplaceDebug = marketplaceDebug && !production
+	if marketplaceDebug && production {
 		fmt.Fprintf(os.Stderr, "WARNING: DEBUG_MARKETPLACE is ignored in production\n")
 	}
 	cfg.BootstrapAdminEmail = getEnv("BOOTSTRAP_ADMIN_EMAIL", "")
@@ -134,6 +142,15 @@ func getEnv(key, defaultValue string) string {
 		return defaultValue
 	}
 	return strings.TrimSpace(value)
+}
+
+// getEnvBool reports whether an environment variable is "true", or returns defaultValue when it is unset
+func getEnvBool(key string, defaultValue bool) bool {
+	value := getEnv(key, "")
+	if value == "" {
+		return defaultValue
+	}
+	return value == "true"
 }
 
 // getEnvRequired gets a required environment variable or returns empty string

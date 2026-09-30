@@ -197,54 +197,43 @@ func syncCatalogue(
 	}
 }
 
-type manualProduct struct {
-	VariantID uuid.UUID
-	Name      string
-	Brand     string
-	Category  string
-	ImageURL  string
-}
-
 func syncManual(ctx context.Context, db *gorm.DB, apply bool, batch int, rep *report) error {
 	after := uuid.Nil
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		var page []manualProduct
+		var page []struct{ ID uuid.UUID }
 		err := db.WithContext(ctx).Raw(`
-			SELECT v.id AS variant_id, p.name, COALESCE(b.name, '') AS brand, COALESCE(c.name, '') AS category,
-				COALESCE((
-					SELECT pi.image_url FROM product_image pi
-					WHERE pi.product_id = p.id
-					ORDER BY pi.sort_order
-					LIMIT 1
-				), '') AS image_url
-			FROM product_variant v
-			JOIN product p ON p.id = v.product_id
-			LEFT JOIN brand b ON b.id = p.brand_id
-			LEFT JOIN category c ON c.id = p.category_id
-			WHERE v.catalog_key IS NULL AND v.id > ?
-			ORDER BY v.id LIMIT ?`, after, batch).Scan(&page).Error
+			SELECT id FROM product_variant
+			WHERE catalog_key IS NULL AND id > ?
+			ORDER BY id LIMIT ?`, after, batch).Scan(&page).Error
 		if err != nil {
 			return fmt.Errorf("list hand-made products: %w", err)
 		}
 		if len(page) == 0 {
 			return nil
 		}
-		after = page[len(page)-1].VariantID
-		rep.manual += len(page)
+		ids := make([]uuid.UUID, len(page))
+		for i, p := range page {
+			ids[i] = p.ID
+		}
+		after = ids[len(ids)-1]
+		rep.manual += len(ids)
 
 		err = inTx(ctx, db, apply, func(tx *gorm.DB) error {
-			for _, p := range page {
-				changed, err := catalogitem.Upsert(tx, catalogitem.Manual(p.VariantID, p.Name, p.Brand, p.Category, p.ImageURL))
+			items, err := catalogitem.ManualItems(tx, ids)
+			if err != nil {
+				return err
+			}
+			for _, item := range items {
+				changed, err := catalogitem.Upsert(tx, item)
 				if err != nil {
 					return err
 				}
 				if changed {
 					rep.changed++
-					log.Info().Str("catalog_key", catalogitem.ManualKey(p.VariantID)).Str("name", p.Name).
-						Msg("catalog item written")
+					log.Info().Str("catalog_key", item.CatalogKey).Str("name", item.Name).Msg("catalog item written")
 				}
 			}
 			return nil

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/AbhishekCS3459/find-me-backend/internal/availability"
+	"github.com/AbhishekCS3459/find-me-backend/internal/catalogitem"
 	"github.com/AbhishekCS3459/find-me-backend/internal/inventory"
 	"github.com/AbhishekCS3459/find-me-backend/internal/listproducts"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/database"
@@ -200,7 +201,8 @@ func (f *fixture) assertInSync(t *testing.T) {
 	for _, id := range f.storeIDs {
 		report, err := availability.Sync(context.Background(), f.db, availability.SyncOptions{StoreID: &id})
 		require.NoError(t, err)
-		assert.Truef(t, report.Clean(), "store %s drifted: %+v", id, report.Drift)
+		assert.Truef(t, report.Clean(), "store %s drifted: %+v, keys without a catalog item: %v",
+			id, report.Drift, report.MissingCatalogKeys)
 	}
 }
 
@@ -488,6 +490,9 @@ func TestSearchRowsCarryTheCatalogKey(t *testing.T) {
 	before := f.row(t, keyed.InventoryID)
 	require.NoError(t, f.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Exec(`UPDATE product_variant SET catalog_key = NULL WHERE id = ?`, keyed.VariantID).Error; err != nil {
+			return err
+		}
+		if err := catalogitem.UpsertManual(tx, []uuid.UUID{keyed.VariantID}); err != nil {
 			return err
 		}
 		return availability.RefreshVariants(tx, []uuid.UUID{keyed.VariantID})

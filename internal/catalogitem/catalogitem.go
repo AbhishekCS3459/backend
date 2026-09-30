@@ -59,6 +59,59 @@ func Manual(variantID uuid.UUID, name, brand, category, imageURL string) Item {
 	}
 }
 
+// ManualItems reads the rows of the given variants that have no catalogue
+// key, from their products. Variants that still have a key are skipped.
+func ManualItems(tx *gorm.DB, variantIDs []uuid.UUID) ([]Item, error) {
+	if len(variantIDs) == 0 {
+		return nil, nil
+	}
+	var rows []struct {
+		VariantID uuid.UUID
+		Name      string
+		Brand     string
+		Category  string
+		ImageURL  string
+	}
+	err := tx.Raw(`
+		SELECT v.id AS variant_id, p.name, COALESCE(b.name, '') AS brand, COALESCE(c.name, '') AS category,
+			COALESCE((
+				SELECT pi.image_url FROM product_image pi
+				WHERE pi.product_id = p.id
+				ORDER BY pi.sort_order
+				LIMIT 1
+			), '') AS image_url
+		FROM product_variant v
+		JOIN product p ON p.id = v.product_id
+		LEFT JOIN brand b ON b.id = p.brand_id
+		LEFT JOIN category c ON c.id = p.category_id
+		WHERE v.catalog_key IS NULL AND v.id IN ?
+		ORDER BY v.id`, variantIDs).Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("read hand-made products: %w", err)
+	}
+	items := make([]Item, len(rows))
+	for i, r := range rows {
+		items[i] = Manual(r.VariantID, r.Name, r.Brand, r.Category, r.ImageURL)
+	}
+	return items, nil
+}
+
+// UpsertManual writes the rows of the given variants that have no catalogue
+// key. Call it in the transaction that clears a variant's key, so the
+// variant:<id> key its search rows switch to always has a product to show.
+func UpsertManual(tx *gorm.DB, variantIDs []uuid.UUID) error {
+	items, err := ManualItems(tx, variantIDs)
+	if err != nil {
+		return err
+	}
+	for _, item := range items {
+		if _, err := Upsert(tx, item); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Upsert inserts or updates the row and reports whether it changed. Safe when
 // two retailers add the same catalogue product at once: the second waits for
 // the first's row and then updates it to the same values. mrp is never written.
