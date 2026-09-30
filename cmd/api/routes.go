@@ -52,6 +52,7 @@ func SetupRoutes(db *database.DB, mongoClient *mongodb.Client, cfg *Config) *chi
 			"http://localhost:5173",
 			"https://todayz.in",
 			"https://www.todayz.in",
+			"https://customer-ui-pearl.vercel.app",
 		}, cfg.CORSAllowedOrigins...),
 		AllowedMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"},
 		AllowedHeaders: []string{
