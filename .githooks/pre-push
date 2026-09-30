@@ -1,0 +1,25 @@
+#!/bin/sh
+# Runs CI's build and lint checks before anything leaves this machine.
+# Enable with `make hooks`; skip once with `git push --no-verify`.
+set -eu
+
+# Git passes one line per ref being pushed; a local sha of all zeros is a branch deletion.
+pushing=false
+while read -r _local_ref local_sha _remote_ref _remote_sha; do
+  case $local_sha in
+    *[!0]*) pushing=true ;;
+  esac
+done
+$pushing || exit 0
+
+cd "$(git rev-parse --show-toplevel)"
+
+if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+  echo "pre-push: note — checking your working tree, which has uncommitted changes."
+fi
+
+if ! make --no-print-directory pre-push; then
+  echo ""
+  echo "pre-push: checks failed, nothing was pushed. Fix the issues above, or skip once with: git push --no-verify"
+  exit 1
+fi

@@ -33,6 +33,12 @@ lint:
 lint-fix:
     make lint-fix
 
+hooks:
+    make hooks
+
+pre-push:
+    make pre-push
+
 fmt:
     make fmt
 

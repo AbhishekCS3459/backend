@@ -1,10 +1,16 @@
-.PHONY: help swagger swagger-serve build run run-prod run-dev dev stop lint lint-fix fmt vet test test-coverage test-utils bench-utils test-setup check migrate-up migrate-down migrate-create migrate-status docker-up docker-down docker-build monitoring-up monitoring-down clean catalog-indexes catalog-cleanup-preview catalog-prepare availability-check availability-backfill catalog-key-check catalog-key-repair catalog-item-sync catalog-item-sync-apply db-copy-local-to-prod
+.PHONY: help swagger swagger-serve build run run-prod run-dev dev stop lint lint-fix pre-push hooks fmt vet test test-coverage test-utils bench-utils test-setup check migrate-up migrate-down migrate-create migrate-status docker-up docker-down docker-build monitoring-up monitoring-down clean catalog-indexes catalog-cleanup-preview catalog-prepare availability-check availability-backfill catalog-key-check catalog-key-repair catalog-item-sync catalog-item-sync-apply db-copy-local-to-prod
 
 # Local development database 
 DEV_DATABASE_URL=postgresql://postgres:postgres@localhost:5434/find_me?sslmode=disable
 # Production database: read from .env.production, or override in your shell:
 # export PROD_DATABASE_URL='postgresql://user:password@host:5432/database?sslmode=require'
 PROD_DATABASE_URL ?= $(shell sed -n 's/^DATABASE_URL=//p' .env.production 2>/dev/null | tail -1)
+# CI's Go toolchain and linter. CI runs `make lint`; keep CI_GO_TOOLCHAIN on the go-version in .github/workflows/ci.yml.
+CI_GO_TOOLCHAIN := go1.25.14
+GOLANGCI_LINT_VERSION := v2.6.1
+TOOLS_DIR := bin/tools
+GOLANGCI_LINT := $(TOOLS_DIR)/golangci-lint-$(GOLANGCI_LINT_VERSION)
+LINT_PACKAGES := ./cmd/... ./tests/...
 # Default target
 help:
 	@echo "Available commands:"
@@ -21,6 +27,8 @@ help:
 	@echo "  make bench-utils      - Run utils benchmarks"
 	@echo "  make lint             - Run linters"
 	@echo "  make lint-fix         - Run linters and auto-fix issues"
+	@echo "  make hooks            - Run build and lint before every git push"
+	@echo "  make pre-push         - Run the pre-push checks now (format, build, vet, lint)"
 	@echo "  make fmt              - Format code"
 	@echo "  make vet              - Run go vet"
 	@echo "  make check             - Run all checks (fmt, vet, lint, test)"
@@ -264,17 +272,46 @@ stop:
 	fi
 	@echo "✅ Server stopped"
 
+# The linter is a release binary built with Go 1.25; it can't read a newer Go's standard library,
+# so checks run on CI's Go toolchain (Go downloads it once) whatever Go is installed locally.
+$(GOLANGCI_LINT):
+	@echo "Installing golangci-lint $(GOLANGCI_LINT_VERSION)..."
+	@mkdir -p $(TOOLS_DIR)
+	@curl -sSfL https://golangci-lint.run/install.sh | sh -s -- -b $(TOOLS_DIR) $(GOLANGCI_LINT_VERSION)
+	@mv $(TOOLS_DIR)/golangci-lint $@
+
 # Run linters (golangci-lint)
-lint:
+lint: export GOTOOLCHAIN = $(CI_GO_TOOLCHAIN)
+lint: $(GOLANGCI_LINT)
 	@echo "Running linters..."
-	@golangci-lint run ./cmd/... ./tests/... || (echo "⚠️  Install golangci-lint: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest" && exit 1)
+	@$(GOLANGCI_LINT) run --timeout=5m $(LINT_PACKAGES)
 	@echo "✅ Linting complete"
 
 # Run linters and auto-fix issues where possible
-lint-fix:
+lint-fix: export GOTOOLCHAIN = $(CI_GO_TOOLCHAIN)
+lint-fix: $(GOLANGCI_LINT)
 	@echo "Running linters with auto-fix..."
-	@golangci-lint run --fix ./cmd/... ./tests/... || (echo "⚠️  Install golangci-lint: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest" && exit 1)
+	@$(GOLANGCI_LINT) run --timeout=5m --fix $(LINT_PACKAGES)
 	@echo "✅ Linting with auto-fix complete"
+
+# Checks run by the git pre-push hook: formatting, build, vet and lint, as CI runs them
+pre-push: export GOTOOLCHAIN = $(CI_GO_TOOLCHAIN)
+pre-push: $(GOLANGCI_LINT)
+	@echo "Checking formatting..."
+	@unformatted=$$("$$(go env GOROOT)/bin/gofmt" -l $$(git ls-files '*.go')); \
+		if [ -n "$$unformatted" ]; then echo "❌ Not formatted (run: make fmt):"; echo "$$unformatted"; exit 1; fi
+	@echo "Building..."
+	@go build ./...
+	@echo "Running go vet..."
+	@go vet ./...
+	@echo "Running linters..."
+	@$(GOLANGCI_LINT) run --timeout=5m $(LINT_PACKAGES)
+	@echo "✅ Ready to push"
+
+# Run the pre-push checks before every git push
+hooks:
+	@git config core.hooksPath .githooks
+	@echo "✅ Git hooks enabled: build and lint run before every push"
 
 # Format code (gofmt)
 fmt:
