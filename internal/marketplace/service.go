@@ -18,6 +18,7 @@ type Service interface {
 	NearbyProducts(ctx context.Context, p NearbyPageParams, debug bool) (*NearbyProductsPage, error)
 	Product(ctx context.Context, p ProductParams, debug bool) (*ProductNearby, error)
 	Store(ctx context.Context, storeID uuid.UUID) (*Store, error)
+	NearbyStores(ctx context.Context, p NearbyStoresParams) (*NearbyStoresResult, error)
 	StoreProducts(ctx context.Context, storeID uuid.UUID, query, cursor string, limit int, debug bool) (*StoreProductsPage, error)
 	StoreProduct(ctx context.Context, storeID uuid.UUID, catalogKey string, debug bool) (*StoreProduct, error)
 }
@@ -301,7 +302,12 @@ func (s *service) Store(ctx context.Context, storeID uuid.UUID) (*Store, error) 
 	if err != nil {
 		return nil, err
 	}
-	store := &Store{
+	store := toStore(*row)
+	return &store, nil
+}
+
+func toStore(row storeRow) Store {
+	store := Store{
 		ID:          row.ID,
 		Name:        row.Name,
 		Description: row.Description,
@@ -315,7 +321,43 @@ func (s *service) Store(ctx context.Context, storeID uuid.UUID) (*Store, error) 
 	if row.Status == "VACATION" {
 		store.VacationUntil = row.VacationUntil
 	}
-	return store, nil
+	return store
+}
+
+// NearbyStores lists the stores customers may see within the radius, nearest
+// first, closed ones included with IsOpen false.
+func (s *service) NearbyStores(ctx context.Context, p NearbyStoresParams) (*NearbyStoresResult, error) {
+	// Stores are always nearest first; validateArea only needs somewhere to put a sort.
+	var sort Sort
+	if err := validateArea(&p.Lat, &p.Lng, &p.RadiusM, &sort, DefaultRadiusM); err != nil {
+		return nil, err
+	}
+	switch {
+	case p.Limit == 0:
+		p.Limit = DefaultNearbyStoresLimit
+	case p.Limit < 0 || p.Limit > MaxNearbyStoresLimit:
+		return nil, invalid(fmt.Sprintf("limit must be between 1 and %d", MaxNearbyStoresLimit))
+	}
+	rows, err := s.repo.NearbyStores(ctx, p, s.staleBefore())
+	if err != nil {
+		return nil, err
+	}
+	result := &NearbyStoresResult{Lat: p.Lat, Lng: p.Lng, RadiusM: p.RadiusM, Stores: []NearbyStore{}}
+	if len(rows) > p.Limit {
+		rows = rows[:p.Limit]
+		result.HasMore = true
+	}
+	for _, row := range rows {
+		result.Stores = append(result.Stores, NearbyStore{
+			Store:          toStore(row.Store),
+			Category:       row.Category,
+			DistanceM:      int(math.Round(row.DistanceM)),
+			CoverImageURL:  row.CoverImageURL,
+			ProductCount:   row.ProductCount,
+			AvailableCount: row.AvailableCount,
+		})
+	}
+	return result, nil
 }
 
 // StoreProducts pages through the products customers can find at the store.

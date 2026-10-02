@@ -29,6 +29,7 @@ type Repository interface {
 	NearbyCategories(ctx context.Context, p NearbyPageParams, staleBefore time.Time) ([]CategoryCount, error)
 	FindProduct(ctx context.Context, catalogKey string) (*Product, error)
 	FindStore(ctx context.Context, storeID uuid.UUID) (*storeRow, error)
+	NearbyStores(ctx context.Context, p NearbyStoresParams, staleBefore time.Time) ([]nearbyStoreRow, error)
 	StoreProducts(ctx context.Context, p StoreProductsParams, q *textQuery, staleBefore time.Time) ([]storeProductRow, error)
 	StoreProduct(ctx context.Context, storeID uuid.UUID, catalogKey string, staleBefore time.Time) (*storeProductRow, error)
 }
@@ -306,21 +307,25 @@ type storeRow struct {
 	Lng           float64
 }
 
-// FindStore returns a store customers may see: onboarded, not deleted, not
-// deactivated, and with a saved location. A closed or on-vacation store is
-// returned; the caller reports it as closed.
+const storeColumns = `s.id, s.name, s.description, s.status, s.is_open, s.vacation_until::text AS vacation_until,
+	l.address_line, l.city, l.pincode, l.lat::float8 AS lat, l.lng::float8 AS lng`
+
+// visibleStore is a store customers may see: onboarded, not deleted and not
+// deactivated. Joined with store_location, it also has a saved location.
+const visibleStore = `s.deleted_at IS NULL
+	AND s.onboarding_status = 'COMPLETED'
+	AND s.status IN ('ACTIVE', 'VACATION')`
+
+// FindStore returns a store customers may see. A closed or on-vacation store
+// is returned; the caller reports it as closed.
 func (r *repository) FindStore(ctx context.Context, storeID uuid.UUID) (*storeRow, error) {
 	var rows []storeRow
 	err := r.readOnly(ctx, func(tx *gorm.DB) error {
 		return tx.Raw(`
-			SELECT s.id, s.name, s.description, s.status, s.is_open, s.vacation_until::text AS vacation_until,
-				l.address_line, l.city, l.pincode, l.lat::float8 AS lat, l.lng::float8 AS lng
+			SELECT `+storeColumns+`
 			FROM store s
 			JOIN store_location l ON l.store_id = s.id
-			WHERE s.id = ?
-				AND s.deleted_at IS NULL
-				AND s.onboarding_status = 'COMPLETED'
-				AND s.status IN ('ACTIVE', 'VACATION')`, storeID).Scan(&rows).Error
+			WHERE s.id = ? AND `+visibleStore, storeID).Scan(&rows).Error
 	})
 	if err != nil {
 		return nil, fmt.Errorf("find store: %w", err)
@@ -329,6 +334,56 @@ func (r *repository) FindStore(ctx context.Context, storeID uuid.UUID) (*storeRo
 		return nil, ErrNotFound
 	}
 	return &rows[0], nil
+}
+
+type nearbyStoreRow struct {
+	Store          storeRow `gorm:"embedded"`
+	Category       string
+	DistanceM      float64
+	CoverImageURL  string
+	ProductCount   int
+	AvailableCount int
+}
+
+// NearbyStores returns up to p.Limit+1 stores customers may see within the
+// radius, nearest first, so the caller can tell whether more follow. The point
+// is inlined so the GiST index on store_location.geog serves ST_DWithin. The
+// cover is the photo marked as cover, else the first photo.
+func (r *repository) NearbyStores(ctx context.Context, p NearbyStoresParams, staleBefore time.Time) ([]nearbyStoreRow, error) {
+	const point = `ST_SetSRID(ST_MakePoint(?, ?), 4326)::geography`
+	var rows []nearbyStoreRow
+	err := r.readOnly(ctx, func(tx *gorm.DB) error {
+		return tx.Raw(`
+			SELECT `+storeColumns+`,
+				COALESCE(cat.name, '') AS category,
+				ST_Distance(l.geog, `+point+`) AS distance_m,
+				COALESCE(cover.media_url, '') AS cover_image_url,
+				listed.product_count, listed.available_count
+			FROM store s
+			JOIN store_location l ON l.store_id = s.id
+			LEFT JOIN category cat ON cat.id = s.category_id
+			LEFT JOIN LATERAL (
+				SELECT m.media_url FROM store_media m
+				WHERE m.store_id = s.id AND m.type = 'photo'
+				ORDER BY m.is_cover DESC, m.sort_order, m.created_at
+				LIMIT 1
+			) cover ON TRUE
+			CROSS JOIN LATERAL (
+				SELECT COUNT(*) AS product_count,
+					COUNT(*) FILTER (WHERE (`+effectiveBucket+`) <> 'OUT') AS available_count
+				FROM store_product_availability a
+				WHERE a.store_id = s.id AND a.searchable
+			) listed
+			WHERE `+visibleStore+`
+				AND ST_DWithin(l.geog, `+point+`, ?)
+			ORDER BY distance_m, s.id
+			LIMIT ?`,
+			p.Lng, p.Lat, staleBefore, p.Lng, p.Lat, p.RadiusM, p.Limit+1).Scan(&rows).Error
+	})
+	if err != nil {
+		return nil, fmt.Errorf("find nearby stores: %w", err)
+	}
+	return rows, nil
 }
 
 type storeProductRow struct {

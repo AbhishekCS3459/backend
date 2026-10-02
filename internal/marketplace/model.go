@@ -48,6 +48,9 @@ const (
 	// Listing every nearby product, one page at a time.
 	DefaultNearbyPageLimit = 20
 	MaxNearbyPageLimit     = 50
+	// Listing the stores near a point, nearest first.
+	DefaultNearbyStoresLimit = 50
+	MaxNearbyStoresLimit     = 100
 	// OtherCategory holds products whose category path is empty.
 	OtherCategory = "Other"
 
@@ -143,6 +146,37 @@ type Store struct {
 	Lng           float64   `json:"lng"`
 	IsOpen        bool      `json:"is_open"`
 	VacationUntil *string   `json:"vacation_until,omitempty"`
+}
+
+// NearbyStoresParams is a validated request for the stores near a point.
+type NearbyStoresParams struct {
+	Lat     float64
+	Lng     float64
+	RadiusM int
+	Limit   int
+}
+
+// NearbyStore is a store near the customer: what they see about it, how far
+// it is and how much they can find there. A closed store lists nothing.
+type NearbyStore struct {
+	Store
+	// Category is the store's kind, e.g. "Pharmacy"; empty when unknown.
+	Category      string `json:"category"`
+	DistanceM     int    `json:"distance_m"`
+	CoverImageURL string `json:"cover_image_url,omitempty"`
+	// ProductCount counts the products customers can find at the store;
+	// AvailableCount those of them not out of stock.
+	ProductCount   int `json:"product_count"`
+	AvailableCount int `json:"available_count"`
+}
+
+type NearbyStoresResult struct {
+	Lat     float64       `json:"lat"`
+	Lng     float64       `json:"lng"`
+	RadiusM int           `json:"radius_m"`
+	Stores  []NearbyStore `json:"stores"`
+	// HasMore is set when more than Limit stores are within the radius.
+	HasMore bool `json:"has_more"`
 }
 
 // StoreProduct is a product at one store, with its price and availability.

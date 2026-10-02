@@ -8,6 +8,7 @@ func (h *Handler) Routes() chi.Router {
 	r.Get("/search", h.Search)
 	r.Get("/nearby", h.Nearby)
 	r.Get("/nearby/products", h.NearbyProducts)
+	r.Get("/nearby/stores", h.NearbyStores)
 	r.Get("/products/{catalogKey}", h.Product)
 	r.Get("/stores/{id}", h.Store)
 	r.Get("/stores/{id}/products", h.StoreProducts)

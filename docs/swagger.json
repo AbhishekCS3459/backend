@@ -412,6 +412,506 @@
                 }
             }
         },
+        "/api/marketplace/nearby": {
+            "get": {
+                "description": "Products sold by stores within the radius, grouped by top-level category (largest first, at most 20). In each category, products stocked by more nearby stores come first. With category, lists every product in that category by name, one page at a time: pass next_cursor as cursor for the next page. Each product lists up to 10 nearby stores ordered by sort. Exact quantities are never returned.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Marketplace"
+                ],
+                "summary": "Browse products near a location by category",
+                "parameters": [
+                    {
+                        "type": "number",
+                        "description": "Latitude, -90 to 90",
+                        "name": "lat",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "number",
+                        "description": "Longitude, -180 to 180",
+                        "name": "lng",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Radius in metres (default 2000, max 20000)",
+                        "name": "radius_m",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "nearest",
+                            "cheapest",
+                            "availability"
+                        ],
+                        "type": "string",
+                        "description": "Store order within each product",
+                        "name": "sort",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Only this top-level category, paged by name",
+                        "name": "category",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Products per category, or per page with category (default 10, max 50)",
+                        "name": "per_category",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "next_cursor from the previous page; requires category",
+                        "name": "cursor",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_marketplace.NearbyResult"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/httputil.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/marketplace/nearby/products": {
+            "get": {
+                "description": "Every product sold by stores within the radius, by name, one page at a time: pass next_cursor as cursor for the next page. With category, only that top-level category. The first page also lists every nearby category with its product count, whatever category is. Each product lists up to 10 nearby stores ordered by sort. Exact quantities are never returned.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Marketplace"
+                ],
+                "summary": "List all products near a location",
+                "parameters": [
+                    {
+                        "type": "number",
+                        "description": "Latitude, -90 to 90",
+                        "name": "lat",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "number",
+                        "description": "Longitude, -180 to 180",
+                        "name": "lng",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Radius in metres (default 2000, max 20000)",
+                        "name": "radius_m",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "nearest",
+                            "cheapest",
+                            "availability"
+                        ],
+                        "type": "string",
+                        "description": "Store order within each product",
+                        "name": "sort",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Only this top-level category",
+                        "name": "category",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Products per page (default 20, max 50)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "next_cursor from the previous page",
+                        "name": "cursor",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_marketplace.NearbyProductsPage"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/httputil.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/marketplace/nearby/stores": {
+            "get": {
+                "description": "Stores customers can see within the radius, nearest first, each with its distance, cover photo and how many products it lists (and how many of those aren't out of stock). Closed stores are included with is_open=false and list nothing. has_more is set when more than limit stores are within the radius.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Marketplace"
+                ],
+                "summary": "List stores near a location",
+                "parameters": [
+                    {
+                        "type": "number",
+                        "description": "Latitude, -90 to 90",
+                        "name": "lat",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "number",
+                        "description": "Longitude, -180 to 180",
+                        "name": "lng",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Radius in metres (default 5000, max 20000)",
+                        "name": "radius_m",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Stores to return (default 50, max 100)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_marketplace.NearbyStoresResult"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/httputil.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Too many requests",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/marketplace/products/{catalogKey}": {
+            "get": {
+                "description": "The canonical product with up to 10 stores within the radius, each with its price, distance and availability, ordered by sort. A product no store lists is 404; one sold only further away has no stores.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Marketplace"
+                ],
+                "summary": "Compare a product's nearby stores",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "The product's catalog_key, URL-encoded (todayz%3A776963)",
+                        "name": "catalogKey",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "number",
+                        "description": "Latitude, -90 to 90",
+                        "name": "lat",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "number",
+                        "description": "Longitude, -180 to 180",
+                        "name": "lng",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Radius in metres (default 2000, max 20000)",
+                        "name": "radius_m",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "nearest",
+                            "cheapest",
+                            "availability"
+                        ],
+                        "type": "string",
+                        "description": "Store order",
+                        "name": "sort",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_marketplace.ProductNearby"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/httputil.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/httputil.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/marketplace/search": {
+            "get": {
+                "description": "Matches products by name, brand or category (typos tolerated: \"cocacola\" finds \"Coca-Cola\"), then lists up to 10 nearby stores selling each, with the store's price, distance and availability bucket. Stock not confirmed within the staleness window shows as CONFIRM_WITH_STORE. Exact quantities are never returned.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Marketplace"
+                ],
+                "summary": "Search products near a location",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Search text, 2 to 100 characters",
+                        "name": "q",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "number",
+                        "description": "Latitude, -90 to 90",
+                        "name": "lat",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "number",
+                        "description": "Longitude, -180 to 180",
+                        "name": "lng",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Search radius in metres (default 5000, max 20000)",
+                        "name": "radius_m",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Products to return (default 20, max 50)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "nearest",
+                            "cheapest",
+                            "availability"
+                        ],
+                        "type": "string",
+                        "description": "Store order within each product",
+                        "name": "sort",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_marketplace.SearchResult"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/httputil.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Too many requests",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/marketplace/stores/{id}": {
+            "get": {
+                "description": "Public details of a store customers can see. A closed store is returned with is_open=false. Unknown, deleted, deactivated or not yet onboarded stores are 404.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Marketplace"
+                ],
+                "summary": "Get a store",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Store ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_marketplace.Store"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/httputil.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/marketplace/stores/{id}/products": {
+            "get": {
+                "description": "Products customers can find at the store, ordered by name, one page at a time. Pass next_cursor as cursor for the next page. A closed store has none.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Marketplace"
+                ],
+                "summary": "List a store's products",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Store ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by name, brand or category, 2 to 100 characters",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Products per page (default 20, max 50)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "next_cursor from the previous page",
+                        "name": "cursor",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_marketplace.StoreProductsPage"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/httputil.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/httputil.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/marketplace/stores/{id}/products/{catalogKey}": {
+            "get": {
+                "description": "The product's details with this store's price and availability, read from the primary database and never cached. Unknown, deleted, closed and unlisted all return the same 404.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Marketplace"
+                ],
+                "summary": "Get a product at a store",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Store ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "The product's catalog_key, URL-encoded (todayz%3A776963)",
+                        "name": "catalogKey",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_marketplace.StoreProduct"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/httputil.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/truecaller/callback": {
             "post": {
                 "consumes": [
@@ -1041,15 +1541,19 @@
         "identity.LoginRequest": {
             "type": "object",
             "required": [
-                "email",
                 "password"
             ],
             "properties": {
                 "email": {
+                    "description": "Email or Phone identifies the account; staff without an email use their phone.",
                     "type": "string"
                 },
                 "password": {
                     "type": "string"
+                },
+                "phone": {
+                    "type": "string",
+                    "maxLength": 32
                 }
             }
         },
@@ -1175,6 +1679,9 @@
                 "is_phone_verified": {
                     "type": "boolean"
                 },
+                "must_change_password": {
+                    "type": "boolean"
+                },
                 "phone": {
                     "type": "string"
                 },
@@ -1214,6 +1721,9 @@
                     "type": "string"
                 },
                 "is_phone_verified": {
+                    "type": "boolean"
+                },
+                "must_change_password": {
                     "type": "boolean"
                 },
                 "phone": {
@@ -1273,6 +1783,425 @@
                     "type": "string",
                     "maxLength": 8,
                     "minLength": 4
+                }
+            }
+        },
+        "internal_marketplace.CategoryCount": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string"
+                },
+                "product_count": {
+                    "type": "integer"
+                }
+            }
+        },
+        "internal_marketplace.Debug": {
+            "type": "object",
+            "properties": {
+                "available_qty": {
+                    "type": "integer"
+                },
+                "version": {
+                    "type": "integer"
+                }
+            }
+        },
+        "internal_marketplace.NearbyCategory": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string"
+                },
+                "product_count": {
+                    "type": "integer"
+                },
+                "products": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_marketplace.SearchProduct"
+                    }
+                }
+            }
+        },
+        "internal_marketplace.NearbyProductsPage": {
+            "type": "object",
+            "properties": {
+                "categories": {
+                    "description": "Categories are all top-level categories nearby, whatever Category is.\nReturned on the first page only.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_marketplace.CategoryCount"
+                    }
+                },
+                "category": {
+                    "type": "string"
+                },
+                "has_more": {
+                    "type": "boolean"
+                },
+                "lat": {
+                    "type": "number"
+                },
+                "lng": {
+                    "type": "number"
+                },
+                "next_cursor": {
+                    "type": "string"
+                },
+                "product_count": {
+                    "description": "ProductCount counts every product in the listing, across all pages.",
+                    "type": "integer"
+                },
+                "products": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_marketplace.SearchProduct"
+                    }
+                },
+                "radius_m": {
+                    "type": "integer"
+                },
+                "sort": {
+                    "$ref": "#/definitions/internal_marketplace.Sort"
+                }
+            }
+        },
+        "internal_marketplace.NearbyResult": {
+            "type": "object",
+            "properties": {
+                "categories": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_marketplace.NearbyCategory"
+                    }
+                },
+                "has_more": {
+                    "type": "boolean"
+                },
+                "lat": {
+                    "type": "number"
+                },
+                "lng": {
+                    "type": "number"
+                },
+                "next_cursor": {
+                    "description": "Set only when browsing one category and more products follow.",
+                    "type": "string"
+                },
+                "radius_m": {
+                    "type": "integer"
+                },
+                "sort": {
+                    "$ref": "#/definitions/internal_marketplace.Sort"
+                }
+            }
+        },
+        "internal_marketplace.NearbyStore": {
+            "type": "object",
+            "properties": {
+                "address_line": {
+                    "type": "string"
+                },
+                "available_count": {
+                    "type": "integer"
+                },
+                "category": {
+                    "description": "Category is the store's kind, e.g. \"Pharmacy\"; empty when unknown.",
+                    "type": "string"
+                },
+                "city": {
+                    "type": "string"
+                },
+                "cover_image_url": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "distance_m": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "is_open": {
+                    "type": "boolean"
+                },
+                "lat": {
+                    "type": "number"
+                },
+                "lng": {
+                    "type": "number"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "pincode": {
+                    "type": "string"
+                },
+                "product_count": {
+                    "description": "ProductCount counts the products customers can find at the store;\nAvailableCount those of them not out of stock.",
+                    "type": "integer"
+                },
+                "vacation_until": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_marketplace.NearbyStoresResult": {
+            "type": "object",
+            "properties": {
+                "has_more": {
+                    "description": "HasMore is set when more than Limit stores are within the radius.",
+                    "type": "boolean"
+                },
+                "lat": {
+                    "type": "number"
+                },
+                "lng": {
+                    "type": "number"
+                },
+                "radius_m": {
+                    "type": "integer"
+                },
+                "stores": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_marketplace.NearbyStore"
+                    }
+                }
+            }
+        },
+        "internal_marketplace.ProductNearby": {
+            "type": "object",
+            "properties": {
+                "brand": {
+                    "type": "string"
+                },
+                "catalog_key": {
+                    "type": "string"
+                },
+                "category_path": {
+                    "type": "string"
+                },
+                "image_url": {
+                    "type": "string"
+                },
+                "lat": {
+                    "type": "number"
+                },
+                "lng": {
+                    "type": "number"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "radius_m": {
+                    "type": "integer"
+                },
+                "sort": {
+                    "$ref": "#/definitions/internal_marketplace.Sort"
+                },
+                "stores": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_marketplace.StoreOffer"
+                    }
+                },
+                "unit": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_marketplace.SearchProduct": {
+            "type": "object",
+            "properties": {
+                "brand": {
+                    "type": "string"
+                },
+                "catalog_key": {
+                    "type": "string"
+                },
+                "category_path": {
+                    "type": "string"
+                },
+                "image_url": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "stores": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_marketplace.StoreOffer"
+                    }
+                },
+                "unit": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_marketplace.SearchResult": {
+            "type": "object",
+            "properties": {
+                "lat": {
+                    "type": "number"
+                },
+                "lng": {
+                    "type": "number"
+                },
+                "products": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_marketplace.SearchProduct"
+                    }
+                },
+                "query": {
+                    "type": "string"
+                },
+                "radius_m": {
+                    "type": "integer"
+                },
+                "sort": {
+                    "$ref": "#/definitions/internal_marketplace.Sort"
+                }
+            }
+        },
+        "internal_marketplace.Sort": {
+            "type": "string",
+            "enum": [
+                "nearest",
+                "cheapest",
+                "availability"
+            ],
+            "x-enum-varnames": [
+                "SortNearest",
+                "SortCheapest",
+                "SortAvailability"
+            ]
+        },
+        "internal_marketplace.Store": {
+            "type": "object",
+            "properties": {
+                "address_line": {
+                    "type": "string"
+                },
+                "city": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "is_open": {
+                    "type": "boolean"
+                },
+                "lat": {
+                    "type": "number"
+                },
+                "lng": {
+                    "type": "number"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "pincode": {
+                    "type": "string"
+                },
+                "vacation_until": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_marketplace.StoreOffer": {
+            "type": "object",
+            "properties": {
+                "availability_bucket": {
+                    "type": "string"
+                },
+                "debug": {
+                    "$ref": "#/definitions/internal_marketplace.Debug"
+                },
+                "distance_m": {
+                    "type": "integer"
+                },
+                "last_stock_update_at": {
+                    "type": "string"
+                },
+                "lat": {
+                    "type": "number"
+                },
+                "lng": {
+                    "type": "number"
+                },
+                "price": {
+                    "type": "number"
+                },
+                "store_id": {
+                    "type": "string"
+                },
+                "store_name": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_marketplace.StoreProduct": {
+            "type": "object",
+            "properties": {
+                "availability_bucket": {
+                    "type": "string"
+                },
+                "brand": {
+                    "type": "string"
+                },
+                "catalog_key": {
+                    "type": "string"
+                },
+                "category_path": {
+                    "type": "string"
+                },
+                "debug": {
+                    "$ref": "#/definitions/internal_marketplace.Debug"
+                },
+                "image_url": {
+                    "type": "string"
+                },
+                "last_stock_update_at": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "price": {
+                    "type": "number"
+                },
+                "store_id": {
+                    "type": "string"
+                },
+                "unit": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_marketplace.StoreProductsPage": {
+            "type": "object",
+            "properties": {
+                "has_more": {
+                    "type": "boolean"
+                },
+                "next_cursor": {
+                    "type": "string"
+                },
+                "products": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_marketplace.StoreProduct"
+                    }
                 }
             }
         },

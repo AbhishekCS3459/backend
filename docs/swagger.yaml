@@ -19,11 +19,15 @@ definitions:
   identity.LoginRequest:
     properties:
       email:
+        description: Email or Phone identifies the account; staff without an email
+          use their phone.
         type: string
       password:
         type: string
+      phone:
+        maxLength: 32
+        type: string
     required:
-    - email
     - password
     type: object
   identity.LoginResponse:
@@ -108,6 +112,8 @@ definitions:
         type: string
       is_phone_verified:
         type: boolean
+      must_change_password:
+        type: boolean
       phone:
         type: string
       status:
@@ -134,6 +140,8 @@ definitions:
       id:
         type: string
       is_phone_verified:
+        type: boolean
+      must_change_password:
         type: boolean
       phone:
         type: string
@@ -178,6 +186,289 @@ definitions:
         type: string
     required:
     - otp
+    type: object
+  internal_marketplace.CategoryCount:
+    properties:
+      name:
+        type: string
+      product_count:
+        type: integer
+    type: object
+  internal_marketplace.Debug:
+    properties:
+      available_qty:
+        type: integer
+      version:
+        type: integer
+    type: object
+  internal_marketplace.NearbyCategory:
+    properties:
+      name:
+        type: string
+      product_count:
+        type: integer
+      products:
+        items:
+          $ref: '#/definitions/internal_marketplace.SearchProduct'
+        type: array
+    type: object
+  internal_marketplace.NearbyProductsPage:
+    properties:
+      categories:
+        description: |-
+          Categories are all top-level categories nearby, whatever Category is.
+          Returned on the first page only.
+        items:
+          $ref: '#/definitions/internal_marketplace.CategoryCount'
+        type: array
+      category:
+        type: string
+      has_more:
+        type: boolean
+      lat:
+        type: number
+      lng:
+        type: number
+      next_cursor:
+        type: string
+      product_count:
+        description: ProductCount counts every product in the listing, across all
+          pages.
+        type: integer
+      products:
+        items:
+          $ref: '#/definitions/internal_marketplace.SearchProduct'
+        type: array
+      radius_m:
+        type: integer
+      sort:
+        $ref: '#/definitions/internal_marketplace.Sort'
+    type: object
+  internal_marketplace.NearbyResult:
+    properties:
+      categories:
+        items:
+          $ref: '#/definitions/internal_marketplace.NearbyCategory'
+        type: array
+      has_more:
+        type: boolean
+      lat:
+        type: number
+      lng:
+        type: number
+      next_cursor:
+        description: Set only when browsing one category and more products follow.
+        type: string
+      radius_m:
+        type: integer
+      sort:
+        $ref: '#/definitions/internal_marketplace.Sort'
+    type: object
+  internal_marketplace.NearbyStore:
+    properties:
+      address_line:
+        type: string
+      available_count:
+        type: integer
+      category:
+        description: Category is the store's kind, e.g. "Pharmacy"; empty when unknown.
+        type: string
+      city:
+        type: string
+      cover_image_url:
+        type: string
+      description:
+        type: string
+      distance_m:
+        type: integer
+      id:
+        type: string
+      is_open:
+        type: boolean
+      lat:
+        type: number
+      lng:
+        type: number
+      name:
+        type: string
+      pincode:
+        type: string
+      product_count:
+        description: |-
+          ProductCount counts the products customers can find at the store;
+          AvailableCount those of them not out of stock.
+        type: integer
+      vacation_until:
+        type: string
+    type: object
+  internal_marketplace.NearbyStoresResult:
+    properties:
+      has_more:
+        description: HasMore is set when more than Limit stores are within the radius.
+        type: boolean
+      lat:
+        type: number
+      lng:
+        type: number
+      radius_m:
+        type: integer
+      stores:
+        items:
+          $ref: '#/definitions/internal_marketplace.NearbyStore'
+        type: array
+    type: object
+  internal_marketplace.ProductNearby:
+    properties:
+      brand:
+        type: string
+      catalog_key:
+        type: string
+      category_path:
+        type: string
+      image_url:
+        type: string
+      lat:
+        type: number
+      lng:
+        type: number
+      name:
+        type: string
+      radius_m:
+        type: integer
+      sort:
+        $ref: '#/definitions/internal_marketplace.Sort'
+      stores:
+        items:
+          $ref: '#/definitions/internal_marketplace.StoreOffer'
+        type: array
+      unit:
+        type: string
+    type: object
+  internal_marketplace.SearchProduct:
+    properties:
+      brand:
+        type: string
+      catalog_key:
+        type: string
+      category_path:
+        type: string
+      image_url:
+        type: string
+      name:
+        type: string
+      stores:
+        items:
+          $ref: '#/definitions/internal_marketplace.StoreOffer'
+        type: array
+      unit:
+        type: string
+    type: object
+  internal_marketplace.SearchResult:
+    properties:
+      lat:
+        type: number
+      lng:
+        type: number
+      products:
+        items:
+          $ref: '#/definitions/internal_marketplace.SearchProduct'
+        type: array
+      query:
+        type: string
+      radius_m:
+        type: integer
+      sort:
+        $ref: '#/definitions/internal_marketplace.Sort'
+    type: object
+  internal_marketplace.Sort:
+    enum:
+    - nearest
+    - cheapest
+    - availability
+    type: string
+    x-enum-varnames:
+    - SortNearest
+    - SortCheapest
+    - SortAvailability
+  internal_marketplace.Store:
+    properties:
+      address_line:
+        type: string
+      city:
+        type: string
+      description:
+        type: string
+      id:
+        type: string
+      is_open:
+        type: boolean
+      lat:
+        type: number
+      lng:
+        type: number
+      name:
+        type: string
+      pincode:
+        type: string
+      vacation_until:
+        type: string
+    type: object
+  internal_marketplace.StoreOffer:
+    properties:
+      availability_bucket:
+        type: string
+      debug:
+        $ref: '#/definitions/internal_marketplace.Debug'
+      distance_m:
+        type: integer
+      last_stock_update_at:
+        type: string
+      lat:
+        type: number
+      lng:
+        type: number
+      price:
+        type: number
+      store_id:
+        type: string
+      store_name:
+        type: string
+    type: object
+  internal_marketplace.StoreProduct:
+    properties:
+      availability_bucket:
+        type: string
+      brand:
+        type: string
+      catalog_key:
+        type: string
+      category_path:
+        type: string
+      debug:
+        $ref: '#/definitions/internal_marketplace.Debug'
+      image_url:
+        type: string
+      last_stock_update_at:
+        type: string
+      name:
+        type: string
+      price:
+        type: number
+      store_id:
+        type: string
+      unit:
+        type: string
+    type: object
+  internal_marketplace.StoreProductsPage:
+    properties:
+      has_more:
+        type: boolean
+      next_cursor:
+        type: string
+      products:
+        items:
+          $ref: '#/definitions/internal_marketplace.StoreProduct'
+        type: array
     type: object
   health.DatabaseHealth:
     properties:
@@ -563,6 +854,368 @@ paths:
       summary: Health check
       tags:
       - Health
+  /api/marketplace/nearby:
+    get:
+      description: 'Products sold by stores within the radius, grouped by top-level
+        category (largest first, at most 20). In each category, products stocked by
+        more nearby stores come first. With category, lists every product in that
+        category by name, one page at a time: pass next_cursor as cursor for the next
+        page. Each product lists up to 10 nearby stores ordered by sort. Exact quantities
+        are never returned.'
+      parameters:
+      - description: Latitude, -90 to 90
+        in: query
+        name: lat
+        required: true
+        type: number
+      - description: Longitude, -180 to 180
+        in: query
+        name: lng
+        required: true
+        type: number
+      - description: Radius in metres (default 2000, max 20000)
+        in: query
+        name: radius_m
+        type: integer
+      - description: Store order within each product
+        enum:
+        - nearest
+        - cheapest
+        - availability
+        in: query
+        name: sort
+        type: string
+      - description: Only this top-level category, paged by name
+        in: query
+        name: category
+        type: string
+      - description: Products per category, or per page with category (default 10,
+          max 50)
+        in: query
+        name: per_category
+        type: integer
+      - description: next_cursor from the previous page; requires category
+        in: query
+        name: cursor
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_marketplace.NearbyResult'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/httputil.ErrorResponse'
+      summary: Browse products near a location by category
+      tags:
+      - Marketplace
+  /api/marketplace/nearby/products:
+    get:
+      description: 'Every product sold by stores within the radius, by name, one page
+        at a time: pass next_cursor as cursor for the next page. With category, only
+        that top-level category. The first page also lists every nearby category with
+        its product count, whatever category is. Each product lists up to 10 nearby
+        stores ordered by sort. Exact quantities are never returned.'
+      parameters:
+      - description: Latitude, -90 to 90
+        in: query
+        name: lat
+        required: true
+        type: number
+      - description: Longitude, -180 to 180
+        in: query
+        name: lng
+        required: true
+        type: number
+      - description: Radius in metres (default 2000, max 20000)
+        in: query
+        name: radius_m
+        type: integer
+      - description: Store order within each product
+        enum:
+        - nearest
+        - cheapest
+        - availability
+        in: query
+        name: sort
+        type: string
+      - description: Only this top-level category
+        in: query
+        name: category
+        type: string
+      - description: Products per page (default 20, max 50)
+        in: query
+        name: limit
+        type: integer
+      - description: next_cursor from the previous page
+        in: query
+        name: cursor
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_marketplace.NearbyProductsPage'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/httputil.ErrorResponse'
+      summary: List all products near a location
+      tags:
+      - Marketplace
+  /api/marketplace/nearby/stores:
+    get:
+      description: Stores customers can see within the radius, nearest first, each
+        with its distance, cover photo and how many products it lists (and how many
+        of those aren't out of stock). Closed stores are included with is_open=false
+        and list nothing. has_more is set when more than limit stores are within the
+        radius.
+      parameters:
+      - description: Latitude, -90 to 90
+        in: query
+        name: lat
+        required: true
+        type: number
+      - description: Longitude, -180 to 180
+        in: query
+        name: lng
+        required: true
+        type: number
+      - description: Radius in metres (default 5000, max 20000)
+        in: query
+        name: radius_m
+        type: integer
+      - description: Stores to return (default 50, max 100)
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_marketplace.NearbyStoresResult'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/httputil.ErrorResponse'
+        "429":
+          description: Too many requests
+          schema:
+            type: string
+      summary: List stores near a location
+      tags:
+      - Marketplace
+  /api/marketplace/products/{catalogKey}:
+    get:
+      description: The canonical product with up to 10 stores within the radius, each
+        with its price, distance and availability, ordered by sort. A product no store
+        lists is 404; one sold only further away has no stores.
+      parameters:
+      - description: The product's catalog_key, URL-encoded (todayz%3A776963)
+        in: path
+        name: catalogKey
+        required: true
+        type: string
+      - description: Latitude, -90 to 90
+        in: query
+        name: lat
+        required: true
+        type: number
+      - description: Longitude, -180 to 180
+        in: query
+        name: lng
+        required: true
+        type: number
+      - description: Radius in metres (default 2000, max 20000)
+        in: query
+        name: radius_m
+        type: integer
+      - description: Store order
+        enum:
+        - nearest
+        - cheapest
+        - availability
+        in: query
+        name: sort
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_marketplace.ProductNearby'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/httputil.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/httputil.ErrorResponse'
+      summary: Compare a product's nearby stores
+      tags:
+      - Marketplace
+  /api/marketplace/search:
+    get:
+      description: 'Matches products by name, brand or category (typos tolerated:
+        "cocacola" finds "Coca-Cola"), then lists up to 10 nearby stores selling each,
+        with the store''s price, distance and availability bucket. Stock not confirmed
+        within the staleness window shows as CONFIRM_WITH_STORE. Exact quantities
+        are never returned.'
+      parameters:
+      - description: Search text, 2 to 100 characters
+        in: query
+        name: q
+        required: true
+        type: string
+      - description: Latitude, -90 to 90
+        in: query
+        name: lat
+        required: true
+        type: number
+      - description: Longitude, -180 to 180
+        in: query
+        name: lng
+        required: true
+        type: number
+      - description: Search radius in metres (default 5000, max 20000)
+        in: query
+        name: radius_m
+        type: integer
+      - description: Products to return (default 20, max 50)
+        in: query
+        name: limit
+        type: integer
+      - description: Store order within each product
+        enum:
+        - nearest
+        - cheapest
+        - availability
+        in: query
+        name: sort
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_marketplace.SearchResult'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/httputil.ErrorResponse'
+        "429":
+          description: Too many requests
+          schema:
+            type: string
+      summary: Search products near a location
+      tags:
+      - Marketplace
+  /api/marketplace/stores/{id}:
+    get:
+      description: Public details of a store customers can see. A closed store is
+        returned with is_open=false. Unknown, deleted, deactivated or not yet onboarded
+        stores are 404.
+      parameters:
+      - description: Store ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_marketplace.Store'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/httputil.ErrorResponse'
+      summary: Get a store
+      tags:
+      - Marketplace
+  /api/marketplace/stores/{id}/products:
+    get:
+      description: Products customers can find at the store, ordered by name, one
+        page at a time. Pass next_cursor as cursor for the next page. A closed store
+        has none.
+      parameters:
+      - description: Store ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Filter by name, brand or category, 2 to 100 characters
+        in: query
+        name: q
+        type: string
+      - description: Products per page (default 20, max 50)
+        in: query
+        name: limit
+        type: integer
+      - description: next_cursor from the previous page
+        in: query
+        name: cursor
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_marketplace.StoreProductsPage'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/httputil.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/httputil.ErrorResponse'
+      summary: List a store's products
+      tags:
+      - Marketplace
+  /api/marketplace/stores/{id}/products/{catalogKey}:
+    get:
+      description: The product's details with this store's price and availability,
+        read from the primary database and never cached. Unknown, deleted, closed
+        and unlisted all return the same 404.
+      parameters:
+      - description: Store ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: The product's catalog_key, URL-encoded (todayz%3A776963)
+        in: path
+        name: catalogKey
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_marketplace.StoreProduct'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/httputil.ErrorResponse'
+      summary: Get a product at a store
+      tags:
+      - Marketplace
   /api/truecaller/callback:
     post:
       consumes:

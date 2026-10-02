@@ -152,6 +152,39 @@ func (h *Handler) NearbyProducts(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, page)
 }
 
+// NearbyStores lists the stores near a location, nearest first.
+// @Summary List stores near a location
+// @Description Stores customers can see within the radius, nearest first, each with its distance, cover photo and how many products it lists (and how many of those aren't out of stock). Closed stores are included with is_open=false and list nothing. has_more is set when more than limit stores are within the radius.
+// @Tags Marketplace
+// @Produce json
+// @Param lat query number true "Latitude, -90 to 90"
+// @Param lng query number true "Longitude, -180 to 180"
+// @Param radius_m query int false "Radius in metres (default 5000, max 20000)"
+// @Param limit query int false "Stores to return (default 50, max 100)"
+// @Success 200 {object} NearbyStoresResult
+// @Failure 400 {object} httputil.ErrorResponse
+// @Failure 429 {string} string "Too many requests"
+// @Router /api/marketplace/nearby/stores [get]
+func (h *Handler) NearbyStores(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+	a, ok := areaParams(w, query)
+	if !ok {
+		return
+	}
+	limit, ok := intParam(w, query, "limit")
+	if !ok {
+		return
+	}
+	result, err := h.svc.NearbyStores(r.Context(), NearbyStoresParams{
+		Lat: a.lat, Lng: a.lng, RadiusM: a.radiusM, Limit: limit,
+	})
+	if err != nil {
+		writeError(w, r, err, "marketplace nearby stores failed")
+		return
+	}
+	writeJSON(w, result)
+}
+
 // Product returns one product with the nearby stores selling it.
 // @Summary Compare a product's nearby stores
 // @Description The canonical product with up to 10 stores within the radius, each with its price, distance and availability, ordered by sort. A product no store lists is 404; one sold only further away has no stores.
