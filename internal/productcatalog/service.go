@@ -31,6 +31,10 @@ func (s *service) List(ctx context.Context, params ListParams) (Page, error) {
 	}
 	params.Query = strings.TrimSpace(params.Query)
 	params.After = strings.TrimSpace(params.After)
+	params.Offset = min(max(params.Offset, 0), MaxListOffset)
+	if params.After != "" {
+		params.Offset = 0
+	}
 	params.Limit = clampLimit(params.Limit, DefaultLimit, MaxLimit)
 	filters, err := normalizeFilters(params.Filters)
 	if err != nil {

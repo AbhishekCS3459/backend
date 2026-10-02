@@ -150,9 +150,15 @@ func TestSearchHitDecodesInlineProduct(t *testing.T) {
 
 type fakeRepository struct {
 	Repository
+	list         ListParams
 	search       SearchParams
 	suggestQuery string
 	suggestLimit int
+}
+
+func (f *fakeRepository) List(_ context.Context, params ListParams) (Page, error) {
+	f.list = params
+	return Page{}, nil
 }
 
 func (f *fakeRepository) Search(_ context.Context, params SearchParams) (SearchResult, error) {
@@ -187,6 +193,31 @@ func TestServiceSearchValidation(t *testing.T) {
 	}
 	if repo.search.Offset != MaxSearchOffset {
 		t.Errorf("offset = %d, want %d", repo.search.Offset, MaxSearchOffset)
+	}
+}
+
+func TestServiceListOffset(t *testing.T) {
+	repo := &fakeRepository{}
+	svc := NewService(repo)
+	ctx := context.Background()
+
+	for _, tc := range []struct {
+		name  string
+		in    ListParams
+		after string
+		want  int
+	}{
+		{"negative", ListParams{Offset: -24}, "", 0},
+		{"page jump", ListParams{Offset: 480}, "", 480},
+		{"too deep", ListParams{Offset: 1 << 30}, "", MaxListOffset},
+		{"cursor wins", ListParams{Offset: 480, After: " blinkit:x:y:1 "}, "blinkit:x:y:1", 0},
+	} {
+		if _, err := svc.List(ctx, tc.in); err != nil {
+			t.Fatal(err)
+		}
+		if repo.list.Offset != tc.want || repo.list.After != tc.after {
+			t.Errorf("%s: offset = %d, after = %q; want %d, %q", tc.name, repo.list.Offset, repo.list.After, tc.want, tc.after)
+		}
 	}
 }
 

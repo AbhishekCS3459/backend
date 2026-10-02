@@ -1,4 +1,4 @@
-.PHONY: help swagger swagger-serve build run run-prod run-dev dev stop lint lint-fix pre-push hooks fmt vet test test-coverage test-utils bench-utils test-setup check migrate-up migrate-down migrate-create migrate-status docker-up docker-down docker-build monitoring-up monitoring-down clean catalog-indexes catalog-cleanup-preview catalog-prepare availability-check availability-backfill catalog-key-check catalog-key-repair catalog-item-sync catalog-item-sync-apply db-copy-local-to-prod db-copy-prod-to-local
+.PHONY: help swagger swagger-serve build run run-prod run-dev dev stop lint lint-fix pre-push hooks fmt vet test test-coverage test-utils bench-utils test-setup check migrate-up migrate-down migrate-create migrate-status docker-up docker-down docker-build monitoring-up monitoring-down clean catalog-indexes catalog-cleanup-preview catalog-prepare catalog-dedupe-preview catalog-dedupe availability-check availability-backfill catalog-key-check catalog-key-repair catalog-item-sync catalog-item-sync-apply db-copy-local-to-prod db-copy-prod-to-local
 
 # Local development database 
 DEV_DATABASE_URL=postgresql://postgres:postgres@localhost:5434/find_me?sslmode=disable
@@ -53,6 +53,8 @@ help:
 	@echo "  make clean            - Clean build artifacts"
 	@echo "  make catalog-cleanup-preview - Show what catalog-prepare would change (MongoDB catalogue)"
 	@echo "  make catalog-prepare  - After a catalogue upload: remove platform/url/city/locality/address/scrapedAt, build search, ensure indexes"
+	@echo "  make catalog-dedupe-preview - Count catalogue copies of the same productId (one per scraped locality)"
+	@echo "  make catalog-dedupe   - Delete those copies, keeping one document per productId"
 	@echo "  make catalog-indexes  - Create the MongoDB catalogue indexes and the product_search Atlas Search index"
 	@echo "  make availability-check    - Report customer search rows that don't match inventory (exits 1 on drift)"
 	@echo "  make availability-backfill - Build or repair the customer search table from inventory"
@@ -106,6 +108,16 @@ catalog-cleanup-preview:
 catalog-prepare:
 	@go run ./cmd/catalog-cleanup -apply
 	@go run ./cmd/catalog-indexes
+
+# Report products stored more than once (the scraper saves one copy per
+# locality), without deleting anything
+catalog-dedupe-preview:
+	@go run ./cmd/catalog-dedupe
+
+# Keep one document per productId (the first in _id order, the one the API
+# already reads) and delete the rest. Safe to re-run after every upload.
+catalog-dedupe:
+	@go run ./cmd/catalog-dedupe -apply
 
 # Report rows of the customer search table that don't match inventory (exits 1 on drift)
 availability-check:

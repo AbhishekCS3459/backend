@@ -16,17 +16,19 @@ import (
 )
 
 const (
-	queryTimeout  = 8 * time.Second
-	totalCacheTTL = 10 * time.Minute
+	queryTimeout = 8 * time.Second
 
 	// Filtered counts stop at countCap so a broad search cannot scan the whole
-	// collection; the UI shows "10,000+" instead.
+	// collection; the UI shows "10,000+" instead. They are cached per filter
+	// set and catalogue size, so loading a scrape that adds products recounts
+	// at once; the TTL covers uploads that only change existing products.
 	countCap          = 10_000
 	countTimeout      = 3 * time.Second
+	countCacheTTL     = 10 * time.Minute
 	countCacheEntries = 1_000
 
-	// Filter options are exact counts over the matching documents. They only
-	// change when a new scrape is loaded, so they are cached per filter set.
+	// Filter options are exact counts over the matching documents, cached the
+	// same way as filtered counts.
 	facetTimeout      = 20 * time.Second
 	facetCacheTTL     = 10 * time.Minute
 	facetCacheEntries = 200
@@ -47,10 +49,8 @@ type Repository interface {
 type repository struct {
 	col *mongo.Collection
 
-	mu      sync.Mutex
-	total   int64
-	totalAt time.Time
-	counts  map[string]countEntry
+	mu     sync.Mutex
+	counts map[string]countEntry
 
 	facetsMu sync.Mutex // serialises facet runs so concurrent requests share one result
 	facets   map[Filters]facetEntry
@@ -59,12 +59,15 @@ type repository struct {
 type countEntry struct {
 	n      int64
 	capped bool
+	exact  bool
 	at     time.Time
+	size   int64 // catalogue size when counted
 }
 
 type facetEntry struct {
 	options FilterOptions
 	at      time.Time
+	size    int64
 }
 
 // NewRepository returns a Repository backed by col, or nil when col is nil.
@@ -101,10 +104,14 @@ func (r *repository) List(ctx context.Context, params ListParams) (Page, error) 
 		filter = append(bson.D{{Key: "_id", Value: bson.D{{Key: "$gt", Value: params.After}}}}, match...)
 	}
 
-	cur, err := r.col.Find(ctx, filter, options.Find().
+	findOptions := options.Find().
 		SetSort(bson.D{{Key: "_id", Value: 1}}).
-		SetLimit(int64(params.Limit+1)).
-		SetProjection(projection))
+		SetLimit(int64(params.Limit + 1)).
+		SetProjection(projection)
+	if params.Offset > 0 {
+		findOptions.SetSkip(int64(params.Offset))
+	}
+	cur, err := r.col.Find(ctx, filter, findOptions)
 	if err != nil {
 		return Page{}, classify(err)
 	}
@@ -135,7 +142,7 @@ func (r *repository) List(ctx context.Context, params ListParams) (Page, error) 
 		page.NextCursor = lastID
 	}
 	total := <-totals
-	page.TotalEstimate, page.TotalCapped = total.n, total.capped
+	page.TotalEstimate, page.TotalCapped, page.TotalExact = total.n, total.capped, total.exact
 	return page, nil
 }
 
@@ -215,15 +222,16 @@ func searchFilter(query string) bson.D {
 // matchingTotal counts matches for the pagination summary. It never fails the
 // page: a slow or failed count just leaves the total unknown.
 func (r *repository) matchingTotal(ctx context.Context, params ListParams, match bson.D) countEntry {
+	size, ok := r.size(ctx)
 	if len(match) == 0 {
-		return countEntry{n: r.estimatedTotal(ctx)}
+		return countEntry{n: size, exact: ok}
 	}
 
 	key := fmt.Sprintf("%q|%+v", params.Query, params.Filters)
 	r.mu.Lock()
-	cached, ok := r.counts[key]
+	cached, cachedOK := r.counts[key]
 	r.mu.Unlock()
-	if ok && time.Since(cached.at) < totalCacheTTL {
+	if ok && cachedOK && cached.size == size && time.Since(cached.at) < countCacheTTL {
 		return cached
 	}
 
@@ -231,7 +239,7 @@ func (r *repository) matchingTotal(ctx context.Context, params ListParams, match
 	defer cancel()
 	n, err := r.col.CountDocuments(countCtx, match, options.Count().SetLimit(countCap))
 
-	entry := countEntry{n: n, capped: n >= countCap, at: time.Now()}
+	entry := countEntry{n: n, capped: n >= countCap, exact: n < countCap, at: time.Now(), size: size}
 	if err != nil {
 		if ctx.Err() != nil {
 			return countEntry{} // the request itself ended; the count says nothing
@@ -239,7 +247,10 @@ func (r *repository) matchingTotal(ctx context.Context, params ListParams, match
 		// Remember "unknown" too, so paging through a slow search pays the
 		// count timeout once rather than on every page.
 		log.Debug().Err(err).Str("filter", key).Msg("catalogue count skipped")
-		entry = countEntry{at: time.Now()}
+		entry = countEntry{at: time.Now(), size: size}
+	}
+	if !ok {
+		return entry // without the size, the entry could never be validated
 	}
 	r.mu.Lock()
 	if len(r.counts) >= countCacheEntries {
@@ -284,30 +295,31 @@ func (r *repository) ExistingProductIDs(ctx context.Context, ids []string) (map[
 	return found, nil
 }
 
-func (r *repository) estimatedTotal(ctx context.Context) int64 {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.total > 0 && time.Since(r.totalAt) < totalCacheTTL {
-		return r.total
-	}
+// size returns the number of products in the catalogue, read from collection
+// metadata: one cheap round trip that stays exact on a replica set, so it is
+// read on every request instead of cached. ok is false when it failed.
+func (r *repository) size(ctx context.Context) (n int64, ok bool) {
 	n, err := r.col.EstimatedDocumentCount(ctx)
 	if err != nil {
-		return r.total
+		if ctx.Err() == nil {
+			log.Warn().Err(err).Msg("catalogue size unavailable")
+		}
+		return 0, false
 	}
-	r.total, r.totalAt = n, time.Now()
-	return n
+	return n, true
 }
 
 // FilterOptions returns the values of each filter among products matching the
 // other selected filters, so picking a group narrows the collections offered.
 func (r *repository) FilterOptions(ctx context.Context, filters Filters) (FilterOptions, error) {
-	if options, ok := r.cachedFacets(filters); ok {
+	size, sized := r.size(ctx)
+	if options, ok := r.cachedFacets(filters, size, sized); ok {
 		return options, nil
 	}
 
 	r.facetsMu.Lock()
 	defer r.facetsMu.Unlock()
-	if options, ok := r.cachedFacets(filters); ok {
+	if options, ok := r.cachedFacets(filters, size, sized); ok {
 		return options, nil
 	}
 
@@ -320,20 +332,26 @@ func (r *repository) FilterOptions(ctx context.Context, filters Filters) (Filter
 	if err != nil {
 		return FilterOptions{}, classify(err)
 	}
+	if !sized {
+		return options, nil
+	}
 	r.mu.Lock()
 	if len(r.facets) >= facetCacheEntries {
 		clear(r.facets)
 	}
-	r.facets[filters] = facetEntry{options: options, at: time.Now()}
+	r.facets[filters] = facetEntry{options: options, at: time.Now(), size: size}
 	r.mu.Unlock()
 	return options, nil
 }
 
-func (r *repository) cachedFacets(filters Filters) (FilterOptions, bool) {
+func (r *repository) cachedFacets(filters Filters, size int64, sized bool) (FilterOptions, bool) {
+	if !sized {
+		return FilterOptions{}, false
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	entry, ok := r.facets[filters]
-	return entry.options, ok && time.Since(entry.at) < facetCacheTTL
+	return entry.options, ok && entry.size == size && time.Since(entry.at) < facetCacheTTL
 }
 
 type valueCount struct {

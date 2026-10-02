@@ -23,7 +23,8 @@ func NewHandler(svc Service) *Handler {
 
 // List returns one page of catalogue products ordered by id.
 // Query params: q (words in the name or brand, or a product id), after (cursor
-// from next_cursor), limit, the filters group, collection, category, brand (values from /filters), in_stock=true, and
+// from next_cursor) or offset (matches to skip, for jumping to a page), limit,
+// the filters group, collection, category, brand (values from /filters), in_stock=true, and
 // min_price / max_price in rupees.
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
@@ -32,11 +33,13 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err, "")
 		return
 	}
+	offset, _ := strconv.Atoi(query.Get("offset"))
 	limit, _ := strconv.Atoi(query.Get("limit"))
 
 	page, err := h.svc.List(r.Context(), ListParams{
 		Query:   query.Get("q"),
 		After:   query.Get("after"),
+		Offset:  offset,
 		Limit:   limit,
 		Filters: filters,
 	})

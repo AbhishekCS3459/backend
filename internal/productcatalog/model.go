@@ -29,7 +29,10 @@ const (
 
 	MaxQueryLength = 200
 	// MaxSearchOffset bounds offset paging: $skip still reads every skipped result.
-	MaxSearchOffset    = 1_000
+	MaxSearchOffset = 1_000
+	// MaxListOffset bounds browse paging. Skipping walks the _id index, which
+	// stays fast at this depth.
+	MaxListOffset      = 100_000
 	DefaultSuggestions = 8
 	MaxSuggestions     = 15
 	// MinAutocompleteLength matches the shortest indexed edge n-gram.
@@ -118,10 +121,12 @@ func skuProductID(query string) (string, bool) {
 	return id, ValidProductID(id)
 }
 
-// ListParams selects one page of the catalogue, ordered by _id.
+// ListParams selects one page of the catalogue, ordered by _id: the page after
+// the After cursor, or else the page starting Offset matches in.
 type ListParams struct {
 	Query   string
 	After   string
+	Offset  int
 	Limit   int
 	Filters Filters
 }
@@ -142,10 +147,12 @@ type Page struct {
 	Items      []Product `json:"items"`
 	NextCursor string    `json:"next_cursor,omitempty"`
 	HasMore    bool      `json:"has_more"`
-	// TotalEstimate is the approximate number of matches, omitted when counting
-	// took too long. TotalCapped means there are at least that many.
+	// TotalEstimate is the number of matches, omitted when counting took too
+	// long. TotalCapped means there are at least that many; TotalExact means
+	// it is the exact count.
 	TotalEstimate int64 `json:"total_estimate,omitempty"`
 	TotalCapped   bool  `json:"total_capped,omitempty"`
+	TotalExact    bool  `json:"total_exact,omitempty"`
 }
 
 // SearchParams selects one page of relevance-ranked search results.
