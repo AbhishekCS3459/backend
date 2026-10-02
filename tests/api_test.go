@@ -77,7 +77,7 @@ func setupTestRouter(t *testing.T) *chi.Mux {
 
 	jwtSecret := "test-jwt-secret-for-testing-only"
 	userService := identity.NewService(identity.NewRepository(testDB.Pool), jwtSecret)
-	healthHandler := health.NewHandler(testDB, nil, "test")
+	healthHandler := health.NewHandler(testDB, nil, nil, "test")
 	identityHandler := identity.NewHandler(userService, nil)
 
 	// API Routes

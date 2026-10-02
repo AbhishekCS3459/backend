@@ -136,6 +136,7 @@ func groupOffers(offers []offerRow, debug bool) map[string][]StoreOffer {
 			Price:              o.Price,
 			AvailabilityBucket: o.AvailabilityBucket,
 			LastStockUpdateAt:  o.LastStockUpdateAt,
+			Version:            o.Version,
 			Debug:              debugFields(debug, o.AvailableQty, o.Version),
 		})
 	}
@@ -411,6 +412,9 @@ func (s *service) StoreProducts(
 // catalogKeyPattern matches the keys store_product_availability can hold.
 var catalogKeyPattern = regexp.MustCompile(`^[a-z][a-z0-9]*:[A-Za-z0-9._-]{1,64}$`)
 
+// ValidCatalogKey reports whether key has the shape of a catalogue key.
+func ValidCatalogKey(key string) bool { return catalogKeyPattern.MatchString(key) }
+
 // StoreProduct returns one product at one store. Unknown, deleted, closed and
 // unlisted all look the same: ErrNotFound.
 func (s *service) StoreProduct(ctx context.Context, storeID uuid.UUID, catalogKey string, debug bool) (*StoreProduct, error) {
@@ -432,6 +436,7 @@ func toStoreProduct(row storeProductRow, debug bool) StoreProduct {
 		Price:              row.Price,
 		AvailabilityBucket: row.AvailabilityBucket,
 		LastStockUpdateAt:  row.LastStockUpdateAt,
+		Version:            row.Version,
 		Debug:              debugFields(debug, row.AvailableQty, row.Version),
 	}
 }

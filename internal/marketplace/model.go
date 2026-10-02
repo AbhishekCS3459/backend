@@ -105,7 +105,10 @@ type StoreOffer struct {
 	Price              float64   `json:"price"`
 	AvailabilityBucket string    `json:"availability_bucket"`
 	LastStockUpdateAt  time.Time `json:"last_stock_update_at"`
-	Debug              *Debug    `json:"debug,omitempty"`
+	// Version grows with every change to this store's row; a live update with
+	// a version no higher than this is already reflected.
+	Version int64  `json:"version"`
+	Debug   *Debug `json:"debug,omitempty"`
 }
 
 // Product is the canonical product customers see, from catalog_item.
@@ -186,7 +189,9 @@ type StoreProduct struct {
 	Price              float64   `json:"price"`
 	AvailabilityBucket string    `json:"availability_bucket"`
 	LastStockUpdateAt  time.Time `json:"last_stock_update_at"`
-	Debug              *Debug    `json:"debug,omitempty"`
+	// Version: see StoreOffer.Version.
+	Version int64  `json:"version"`
+	Debug   *Debug `json:"debug,omitempty"`
 }
 
 // NearbyParams is a validated request for products sold near a point.

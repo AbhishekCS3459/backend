@@ -36,28 +36,41 @@ func DefaultStreamOptions() StreamOptions {
 // writeTimeout bounds each write, so a client that stopped reading can't hold the stream open.
 const writeTimeout = 10 * time.Second
 
-// Stream sends a "change" event after each signal on updates until the client
-// leaves, the hub closes or MaxLifetime passes. It starts with a "ready" event
-// once the stream is open. Call it only after authorising the request.
-func Stream(w http.ResponseWriter, r *http.Request, hub *Hub, updates <-chan struct{}, opts StreamOptions) {
-	rc := http.NewResponseController(w)
+// EventWriter writes a server-sent events response.
+type EventWriter struct {
+	w  http.ResponseWriter
+	rc *http.ResponseController
+}
+
+// OpenEvents sends the status and headers of an event stream.
+func OpenEvents(w http.ResponseWriter) *EventWriter {
 	header := w.Header()
 	header.Set("Content-Type", "text/event-stream")
 	// no-transform stops proxies and compressors from buffering the stream.
 	header.Set("Cache-Control", "no-cache, no-transform")
 	header.Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
+	return &EventWriter{w: w, rc: http.NewResponseController(w)}
+}
 
-	send := func(event string) bool {
-		// The server's WriteTimeout covers a whole response; a stream sets its own per write.
-		if err := rc.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil && !errors.Is(err, http.ErrNotSupported) {
-			return false
-		}
-		if _, err := fmt.Fprint(w, event); err != nil {
-			return false
-		}
-		return rc.Flush() == nil
+// Send writes and flushes chunk, one or more complete events. It reports false
+// once the client can no longer be written to.
+func (e *EventWriter) Send(chunk string) bool {
+	// The server's WriteTimeout covers a whole response; a stream sets its own per write.
+	if err := e.rc.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		return false
 	}
+	if _, err := fmt.Fprint(e.w, chunk); err != nil {
+		return false
+	}
+	return e.rc.Flush() == nil
+}
+
+// Stream sends a "change" event after each signal on updates until the client
+// leaves, the hub closes or MaxLifetime passes. It starts with a "ready" event
+// once the stream is open. Call it only after authorising the request.
+func Stream(w http.ResponseWriter, r *http.Request, hub *Hub, updates <-chan struct{}, opts StreamOptions) {
+	send := OpenEvents(w).Send
 
 	if !send(fmt.Sprintf("retry: %d\nevent: ready\ndata: {}\n\n", opts.Retry.Milliseconds())) {
 		log.Debug().Str("path", r.URL.Path).Msg("event stream could not start")

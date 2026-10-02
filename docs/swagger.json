@@ -385,7 +385,7 @@
         },
         "/api/health": {
             "get": {
-                "description": "Check if the API is running and its databases are accessible. PostgreSQL is required; MongoDB (product catalogue) is reported but does not affect the status code.",
+                "description": "Check if the API is running and its databases are accessible. PostgreSQL is required; MongoDB (product catalogue) and Redis (live marketplace updates) are reported but do not affect the status code.",
                 "consumes": [
                     "application/json"
                 ],
@@ -691,6 +691,65 @@
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/httputil.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/marketplace/products/{catalogKey}/live": {
+            "get": {
+                "description": "Server-sent events for one product. \"ready\" (data {}) once the stream is live: fetch the product now, so no change falls between the snapshot and the stream. \"offer\" carries one store's new price and availability bucket, newest first per store; apply it only if its version is higher than the one you have, and drop the store when searchable is false. \"resync\" (data {}) means changes may have been missed: fetch the product again. The stream ends after a few minutes and the browser reconnects; each \"ready\" calls for a fresh fetch. 503 means live updates are off: poll instead. Exact quantities are never sent.",
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "Marketplace"
+                ],
+                "summary": "Live availability of a product",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "The product's catalog_key, URL-encoded (todayz%3A776963)",
+                        "name": "catalogKey",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Only this store's changes",
+                        "name": "store_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "offer event data",
+                        "schema": {
+                            "$ref": "#/definitions/internal_marketplace_live.Update"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/httputil.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/httputil.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "$ref": "#/definitions/httputil.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
                         "schema": {
                             "$ref": "#/definitions/httputil.ErrorResponse"
                         }
@@ -2147,6 +2206,10 @@
                 },
                 "store_name": {
                     "type": "string"
+                },
+                "version": {
+                    "description": "Version grows with every change to this store's row; a live update with\na version no higher than this is already reflected.",
+                    "type": "integer"
                 }
             }
         },
@@ -2185,6 +2248,10 @@
                 },
                 "unit": {
                     "type": "string"
+                },
+                "version": {
+                    "description": "Version: see StoreOffer.Version.",
+                    "type": "integer"
                 }
             }
         },
@@ -2202,6 +2269,34 @@
                     "items": {
                         "$ref": "#/definitions/internal_marketplace.StoreProduct"
                     }
+                }
+            }
+        },
+        "internal_marketplace_live.Update": {
+            "type": "object",
+            "properties": {
+                "availability_bucket": {
+                    "type": "string"
+                },
+                "catalog_key": {
+                    "type": "string"
+                },
+                "last_stock_update_at": {
+                    "type": "string"
+                },
+                "price": {
+                    "type": "number"
+                },
+                "searchable": {
+                    "description": "Searchable is false once customers can no longer find the product at the store.",
+                    "type": "boolean"
+                },
+                "store_id": {
+                    "type": "string"
+                },
+                "version": {
+                    "description": "Version orders the updates of one store's row: apply only a higher one.",
+                    "type": "integer"
                 }
             }
         },
@@ -2229,6 +2324,9 @@
                     "type": "string"
                 },
                 "mongodb": {
+                    "$ref": "#/definitions/health.DatabaseHealth"
+                },
+                "redis": {
                     "$ref": "#/definitions/health.DatabaseHealth"
                 },
                 "service": {

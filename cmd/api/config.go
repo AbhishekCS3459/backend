@@ -37,12 +37,16 @@ type Config struct {
 	// Queue (optional - for background job processing)
 	QueueURL string // Redis URL or empty for in-memory queue
 
-	// Redis (optional - Truecaller session cache; falls back to memory)
+	// Redis (optional - Truecaller session cache, falling back to memory, and
+	// the bus for live marketplace updates, which are off without it)
 	RedisURL string
 
 	// OutboxPublisherEnabled runs the outbox publisher in this process. Safe
 	// on several instances at once.
 	OutboxPublisherEnabled bool
+	// OutboxPollInterval is the publisher's pause once the outbox is empty,
+	// and so the usual delay before a live update goes out.
+	OutboxPollInterval time.Duration
 
 	// CORSAllowedOrigins are added to the built-in origins (e.g. a test UI).
 	CORSAllowedOrigins []string
@@ -52,6 +56,8 @@ type Config struct {
 	MarketplaceStaleAfter time.Duration
 	// MarketplaceDebug lets X-Debug: 1 return exact quantities. Always false in production.
 	MarketplaceDebug bool
+	// MarketplaceLiveMaxPerIP caps the live availability streams one client address holds open.
+	MarketplaceLiveMaxPerIP int
 
 	// Bootstrap admin (optional - created on startup if no admin exists)
 	BootstrapAdminEmail    string
@@ -105,6 +111,7 @@ func LoadConfig() (*Config, error) {
 	cfg.QueueURL = getEnv("QUEUE_URL", "")
 	cfg.RedisURL = getEnv("REDIS_URL", cfg.QueueURL)
 	cfg.OutboxPublisherEnabled = getEnvBool("OUTBOX_PUBLISHER_ENABLED", true)
+	cfg.OutboxPollInterval = parseDuration(getEnv("OUTBOX_POLL_INTERVAL", "250ms"), 250*time.Millisecond)
 
 	for _, origin := range strings.Split(getEnv("CORS_ALLOWED_ORIGINS", ""), ",") {
 		if origin = strings.TrimSpace(origin); origin != "" {
@@ -119,6 +126,7 @@ func LoadConfig() (*Config, error) {
 	if marketplaceDebug && production {
 		fmt.Fprintf(os.Stderr, "WARNING: DEBUG_MARKETPLACE is ignored in production\n")
 	}
+	cfg.MarketplaceLiveMaxPerIP = parseInt(getEnv("MARKETPLACE_LIVE_MAX_PER_IP", "30"), 30)
 	cfg.BootstrapAdminEmail = getEnv("BOOTSTRAP_ADMIN_EMAIL", "")
 	cfg.BootstrapAdminPassword = getEnv("BOOTSTRAP_ADMIN_PASSWORD", "")
 	cfg.BootstrapAdminPhone = getEnv("BOOTSTRAP_ADMIN_PHONE", "+10000000000")

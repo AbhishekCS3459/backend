@@ -12,11 +12,13 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
+	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
 	"github.com/AbhishekCS3459/find-me-backend/internal/identity"
 	"github.com/AbhishekCS3459/find-me-backend/internal/inventory"
+	"github.com/AbhishekCS3459/find-me-backend/internal/marketplace/live"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/database"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/mongodb"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/outbox"
@@ -105,7 +107,28 @@ func run() error {
 		return fmt.Errorf("bootstrap admin user: %w", err)
 	}
 
-	stopPublisher := startOutboxPublisher(db, cfg.OutboxPublisherEnabled)
+	rdb := connectRedis(ctx, cfg.RedisURL)
+	if rdb != nil {
+		defer func() {
+			if err := rdb.Close(); err != nil {
+				log.Error().Err(err).Msg("redis close failed")
+			}
+		}()
+	}
+
+	// Without Redis, events are only logged and customers poll for changes.
+	var sink outbox.Sink = outbox.LogSink{}
+	var gateway *live.Gateway
+	if rdb != nil {
+		sink = live.NewSink(rdb)
+		gateway = live.NewGateway(rdb, live.GatewayConfig{
+			StaleAfter:       cfg.MarketplaceStaleAfter,
+			MaxSubscriptions: maxMarketplaceStreams,
+		})
+		defer gateway.Close()
+	}
+
+	stopPublisher := startOutboxPublisher(db, sink, cfg)
 	defer stopPublisher()
 
 	hub := realtime.NewHub(maxLiveStreams)
@@ -113,7 +136,7 @@ func run() error {
 	defer stopListener()
 
 	// Setup routes
-	router := SetupRoutes(db, mongoClient, cfg, hub)
+	router := SetupRoutes(db, mongoClient, rdb, cfg, hub, gateway)
 
 	// Create HTTP server
 	server := &http.Server{
@@ -125,6 +148,9 @@ func run() error {
 	}
 	// Shutdown waits for open requests; event streams would otherwise hold it until its deadline.
 	server.RegisterOnShutdown(hub.Close)
+	if gateway != nil {
+		server.RegisterOnShutdown(gateway.Close)
+	}
 
 	// Start server in a goroutine
 	go func() {
@@ -161,14 +187,16 @@ func run() error {
 
 // startOutboxPublisher runs the publisher until the returned stop function is
 // called; stop waits for an in-flight batch to finish.
-func startOutboxPublisher(db *database.DB, enabled bool) (stop func()) {
-	if !enabled {
+func startOutboxPublisher(db *database.DB, sink outbox.Sink, cfg *Config) (stop func()) {
+	if !cfg.OutboxPublisherEnabled {
 		log.Info().Msg("outbox publisher disabled")
 		return func() {}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
-	publisher := outbox.NewPublisher(db.Gorm, outbox.LogSink{}, outbox.DefaultPublisherConfig())
+	publisherCfg := outbox.DefaultPublisherConfig()
+	publisherCfg.Interval = cfg.OutboxPollInterval
+	publisher := outbox.NewPublisher(db.Gorm, sink, publisherCfg)
 	go func() {
 		defer close(done)
 		publisher.Run(ctx)
@@ -179,8 +207,34 @@ func startOutboxPublisher(db *database.DB, enabled bool) (stop func()) {
 	}
 }
 
-// maxLiveStreams caps the event streams one instance holds open.
+// maxLiveStreams caps the retailer inventory event streams one instance holds open.
 const maxLiveStreams = 10000
+
+// maxMarketplaceStreams caps the customer availability streams one instance holds open.
+const maxMarketplaceStreams = 20000
+
+// connectRedis returns nil when Redis is not configured. A configured but
+// unreachable Redis still returns a client: it connects once Redis is up.
+func connectRedis(ctx context.Context, rawURL string) *redis.Client {
+	if rawURL == "" {
+		log.Warn().Msg("REDIS_URL not set; live marketplace updates disabled")
+		return nil
+	}
+	opts, err := redis.ParseURL(rawURL)
+	if err != nil {
+		log.Error().Err(err).Msg("invalid REDIS_URL; live marketplace updates disabled")
+		return nil
+	}
+	client := redis.NewClient(opts)
+	pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if err := client.Ping(pingCtx).Err(); err != nil {
+		log.Warn().Err(err).Str("addr", opts.Addr).Msg("redis unreachable; live marketplace updates start once it is")
+	} else {
+		log.Info().Str("addr", opts.Addr).Msg("redis connected; live marketplace updates enabled")
+	}
+	return client
+}
 
 // startInventoryListener relays inventory changes committed by any instance to
 // this instance's event streams, until the returned stop function is called.

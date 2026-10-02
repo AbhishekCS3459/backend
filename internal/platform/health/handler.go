@@ -10,6 +10,7 @@ import (
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/httputil"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/mongodb"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/version"
+	"github.com/redis/go-redis/v9"
 )
 
 // dependencyTimeout bounds each dependency ping so an unreachable backend cannot
@@ -20,13 +21,14 @@ const dependencyTimeout = 2 * time.Second
 type Handler struct {
 	db          *database.DB
 	mongo       *mongodb.Client
+	redis       *redis.Client
 	environment string
 }
 
 // NewHandler creates a new health handler. mongo may be nil when the product
-// catalogue is disabled.
-func NewHandler(db *database.DB, mongo *mongodb.Client, environment string) *Handler {
-	return &Handler{db: db, mongo: mongo, environment: environment}
+// catalogue is disabled, and rdb when live marketplace updates are.
+func NewHandler(db *database.DB, mongo *mongodb.Client, rdb *redis.Client, environment string) *Handler {
+	return &Handler{db: db, mongo: mongo, redis: rdb, environment: environment}
 }
 
 // HealthResponse represents the health check response
@@ -37,6 +39,7 @@ type HealthResponse struct {
 	Timestamp   string          `json:"timestamp"`
 	Database    *DatabaseHealth `json:"database,omitempty"`
 	MongoDB     *DatabaseHealth `json:"mongodb,omitempty"`
+	Redis       *DatabaseHealth `json:"redis,omitempty"`
 	Version     string          `json:"version,omitempty"`
 	Uptime      string          `json:"uptime,omitempty"`
 }
@@ -52,7 +55,7 @@ var startTime = time.Now()
 
 // Health returns the health status of the API
 // @Summary Health check
-// @Description Check if the API is running and its databases are accessible. PostgreSQL is required; MongoDB (product catalogue) is reported but does not affect the status code.
+// @Description Check if the API is running and its databases are accessible. PostgreSQL is required; MongoDB (product catalogue) and Redis (live marketplace updates) are reported but do not affect the status code.
 // @Tags Health
 // @Accept json
 // @Produce json
@@ -84,6 +87,16 @@ func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 		})
 	} else {
 		response.MongoDB = &DatabaseHealth{Status: "disabled"}
+	}
+	if h.redis != nil {
+		wg.Go(func() {
+			redisHealth := checkDependency(ctx, func(ctx context.Context) error {
+				return h.redis.Ping(ctx).Err()
+			})
+			response.Redis = &redisHealth
+		})
+	} else {
+		response.Redis = &DatabaseHealth{Status: "disabled"}
 	}
 	wg.Wait()
 

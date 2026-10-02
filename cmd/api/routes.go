@@ -13,6 +13,7 @@ import (
 	"github.com/AbhishekCS3459/find-me-backend/internal/inventory"
 	"github.com/AbhishekCS3459/find-me-backend/internal/listproducts"
 	"github.com/AbhishekCS3459/find-me-backend/internal/marketplace"
+	"github.com/AbhishekCS3459/find-me-backend/internal/marketplace/live"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/database"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/health"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/middleware"
@@ -26,6 +27,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	chiMiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/redis/go-redis/v9"
 	httpSwagger "github.com/swaggo/http-swagger"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
@@ -33,9 +35,14 @@ import (
 )
 
 // SetupRoutes configures all HTTP routes (exported for testing).
-// mongoClient may be nil; catalogue endpoints then respond 503.
-// hub carries live inventory changes to open event streams.
-func SetupRoutes(db *database.DB, mongoClient *mongodb.Client, cfg *Config, hub *realtime.Hub) *chi.Mux {
+// mongoClient may be nil; catalogue endpoints then respond 503. rdb may be nil
+// when Redis is not configured; health then reports it disabled.
+// hub carries live inventory changes to open event streams. gateway carries
+// availability changes to customers; nil turns live marketplace streams off.
+func SetupRoutes(
+	db *database.DB, mongoClient *mongodb.Client, rdb *redis.Client, cfg *Config,
+	hub *realtime.Hub, gateway *live.Gateway,
+) *chi.Mux {
 	router := chi.NewRouter()
 
 	// Middleware stack (order matters!)
@@ -48,7 +55,9 @@ func SetupRoutes(db *database.DB, mongoClient *mongodb.Client, cfg *Config, hub 
 	router.Use(middleware.Recoverer)           // Panic recovery with stack traces
 	router.Use(chiMiddleware.Compress(5))      // Response compression
 	// Request timeout; event streams end on their own (see realtime.StreamOptions).
-	router.Use(middleware.TimeoutExcept(60*time.Second, inventory.IsEventsRequest))
+	router.Use(middleware.TimeoutExcept(60*time.Second, func(r *http.Request) bool {
+		return inventory.IsEventsRequest(r) || live.IsStreamRequest(r)
+	}))
 
 	corsConfig := &middleware.CORSConfig{
 		AllowedOrigins: append([]string{
@@ -82,7 +91,7 @@ func SetupRoutes(db *database.DB, mongoClient *mongodb.Client, cfg *Config, hub 
 	}
 
 	userService := identity.NewService(identity.NewRepository(db.Pool), cfg.JWTSecret)
-	healthHandler := health.NewHandler(db, mongoClient, cfg.Environment)
+	healthHandler := health.NewHandler(db, mongoClient, rdb, cfg.Environment)
 	retailerRepo := retailer.NewRepository(db.Gorm)
 	retailerService := retailer.NewService(retailerRepo)
 	identityHandler := identity.NewHandler(userService, retailerService)
@@ -113,6 +122,16 @@ func SetupRoutes(db *database.DB, mongoClient *mongodb.Client, cfg *Config, hub 
 		marketplace.NewService(marketplace.NewRepository(db.Gorm), marketplace.Config{StaleAfter: cfg.MarketplaceStaleAfter}),
 		cfg.MarketplaceDebug,
 	)
+	marketplaceRoutes := marketplaceHandler.Routes()
+	marketplaceRoutes.Get("/products/{catalogKey}/live", live.NewHandler(gateway, live.HandlerConfig{
+		MaxPerIP: cfg.MarketplaceLiveMaxPerIP,
+		Stream: realtime.StreamOptions{
+			Heartbeat:   15 * time.Second,
+			MaxLifetime: 10 * time.Minute,
+			MinInterval: 500 * time.Millisecond,
+			Retry:       3 * time.Second,
+		},
+	}).Stream)
 
 	// API Routes
 	// Note: API versioning structure ready for expansion
@@ -162,7 +181,7 @@ func SetupRoutes(db *database.DB, mongoClient *mongodb.Client, cfg *Config, hub 
 		r.Mount("/team", teamHandler.Routes())
 		r.Mount("/truecaller", truecallerHandler.Routes())
 		// Public (see isPublicRoute); under the global rate limit like everything else.
-		r.Mount("/marketplace", marketplaceHandler.Routes())
+		r.Mount("/marketplace", marketplaceRoutes)
 
 		// Future: API versioning example
 		// r.Route("/v2", func(r chi.Router) {

@@ -19,8 +19,7 @@ type Sink interface {
 	Publish(ctx context.Context, messages []Message) map[uuid.UUID]error
 }
 
-// LogSink only logs. It stands in until a real consumer (notifications,
-// analytics, a search index) needs the events.
+// LogSink only logs. It is the sink when no message bus is configured.
 type LogSink struct{}
 
 func (LogSink) Publish(_ context.Context, messages []Message) map[uuid.UUID]error {
@@ -88,10 +87,14 @@ func NewPublisher(db *gorm.DB, sink Sink, cfg PublisherConfig) *Publisher {
 	return &Publisher{db: db, sink: sink, cfg: cfg}
 }
 
+// cleanupInterval spaces out deleting old events; polls can be far more frequent.
+const cleanupInterval = time.Minute
+
 // Run publishes until ctx is cancelled.
 func (p *Publisher) Run(ctx context.Context) {
 	timer := time.NewTimer(0)
 	defer timer.Stop()
+	var lastCleanup time.Time
 	for {
 		select {
 		case <-ctx.Done():
@@ -102,8 +105,11 @@ func (p *Publisher) Run(ctx context.Context) {
 		if err != nil && ctx.Err() == nil {
 			log.Error().Err(err).Msg("outbox publish failed")
 		}
-		if err := p.deletePublished(ctx); err != nil && ctx.Err() == nil {
-			log.Error().Err(err).Msg("outbox cleanup failed")
+		if time.Since(lastCleanup) >= cleanupInterval {
+			lastCleanup = time.Now()
+			if err := p.deletePublished(ctx); err != nil && ctx.Err() == nil {
+				log.Error().Err(err).Msg("outbox cleanup failed")
+			}
 		}
 		// A full batch means more may be waiting, so poll again right away.
 		wait := p.cfg.Interval
