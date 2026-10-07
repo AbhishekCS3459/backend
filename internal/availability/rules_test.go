@@ -23,6 +23,14 @@ func TestBucketFor(t *testing.T) {
 	}
 }
 
+func TestOrderableQuantity(t *testing.T) {
+	assert.Equal(t, 0, OrderableQuantity(-2))
+	assert.Equal(t, 0, OrderableQuantity(0))
+	assert.Equal(t, 3, OrderableQuantity(3))
+	assert.Equal(t, MaxOrderQuantity, OrderableQuantity(MaxOrderQuantity))
+	assert.Equal(t, MaxOrderQuantity, OrderableQuantity(500), "never more than the cap")
+}
+
 func TestStoreSearchable(t *testing.T) {
 	assert.True(t, StoreSearchable("ACTIVE", true, "COMPLETED", false))
 	assert.False(t, StoreSearchable("ACTIVE", false, "COMPLETED", false), "closed")

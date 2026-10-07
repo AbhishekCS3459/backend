@@ -1,4 +1,4 @@
-.PHONY: help swagger swagger-serve build run run-prod run-dev dev stop lint lint-fix pre-push hooks fmt vet test test-coverage test-utils bench-utils test-setup check migrate-up migrate-down migrate-create migrate-status docker-up docker-down docker-build monitoring-up monitoring-down clean catalog-indexes catalog-cleanup-preview catalog-prepare catalog-dedupe-preview catalog-dedupe availability-check availability-backfill catalog-key-check catalog-key-repair catalog-item-sync catalog-item-sync-apply db-copy-local-to-prod db-copy-prod-to-local
+.PHONY: help swagger swagger-serve build run run-prod run-dev dev stop lint lint-fix pre-push hooks fmt vet test test-coverage test-utils bench-utils test-setup check migrate-up migrate-down migrate-create migrate-status docker-up docker-down docker-build monitoring-up monitoring-down clean catalog-indexes catalog-cleanup-preview catalog-prepare catalog-dedupe-preview catalog-dedupe availability-check availability-backfill orders-check catalog-key-check catalog-key-repair catalog-item-sync catalog-item-sync-apply db-copy-local-to-prod db-copy-prod-to-local
 
 # Local development database 
 DEV_DATABASE_URL=postgresql://postgres:postgres@localhost:5434/find_me?sslmode=disable
@@ -58,6 +58,7 @@ help:
 	@echo "  make catalog-indexes  - Create the MongoDB catalogue indexes and the product_search Atlas Search index"
 	@echo "  make availability-check    - Report customer search rows that don't match inventory (exits 1 on drift)"
 	@echo "  make availability-backfill - Build or repair the customer search table from inventory"
+	@echo "  make orders-check          - Check orders against stock and payments (exits 1 on problems)"
 	@echo "  make catalog-key-check     - Audit catalogue keys and reserved TDZ- SKUs (exits 1 if anything is found)"
 	@echo "  make catalog-key-repair    - Clear unknown keys, rename reserved SKUs, refresh their search rows"
 	@echo "  make catalog-item-sync     - Report missing or outdated canonical products for search (exits 1 if any)"
@@ -127,6 +128,11 @@ availability-check:
 # while the API is serving; only rows that differ are written.
 availability-backfill:
 	@go run ./cmd/availability-sync -apply
+
+# Check orders against stock and payments: reserved units vs active
+# reservations, overdue or stuck orders, stalled refunds (exits 1 if any)
+orders-check:
+	@go run ./cmd/order-reconcile
 
 # Audit catalogue identity: keys (todayz:<productId>) naming products missing
 # from the MongoDB catalogue, keyed variants whose name doesn't match the

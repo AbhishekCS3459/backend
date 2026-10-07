@@ -32,7 +32,7 @@ func (h *Handler) debugRequested(r *http.Request) bool {
 
 // Search finds products near a location and the stores selling them.
 // @Summary Search products near a location
-// @Description Matches products by name, brand or category (typos tolerated: "cocacola" finds "Coca-Cola"), then lists up to 10 nearby stores selling each, with the store's price, distance and availability bucket. Stock not confirmed within the staleness window shows as CONFIRM_WITH_STORE. Exact quantities are never returned.
+// @Description Matches products by name, brand or category (typos tolerated: "cocacola" finds "Coca-Cola"), then lists up to 10 nearby stores selling each, with the store's price, distance and availability bucket. Stock not confirmed within the staleness window shows as CONFIRM_WITH_STORE. Exact quantities are never returned: max_order_quantity is how many a customer can order, at most 10.
 // @Tags Marketplace
 // @Produce json
 // @Param q query string true "Search text, 2 to 100 characters"
@@ -72,7 +72,7 @@ func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 
 // Nearby lists products sold near a location, grouped by category.
 // @Summary Browse products near a location by category
-// @Description Products sold by stores within the radius, grouped by top-level category (largest first, at most 20). In each category, products stocked by more nearby stores come first. With category, lists every product in that category by name, one page at a time: pass next_cursor as cursor for the next page. Each product lists up to 10 nearby stores ordered by sort. Exact quantities are never returned.
+// @Description Products sold by stores within the radius, grouped by top-level category (largest first, at most 20). In each category, products stocked by more nearby stores come first. With category, lists every product in that category by name, one page at a time: pass next_cursor as cursor for the next page. Each product lists up to 10 nearby stores ordered by sort. Exact quantities are never returned: max_order_quantity is how many a customer can order, at most 10.
 // @Tags Marketplace
 // @Produce json
 // @Param lat query number true "Latitude, -90 to 90"
@@ -113,7 +113,7 @@ func (h *Handler) Nearby(w http.ResponseWriter, r *http.Request) {
 
 // NearbyProducts lists every product sold near a location, one page at a time.
 // @Summary List all products near a location
-// @Description Every product sold by stores within the radius, by name, one page at a time: pass next_cursor as cursor for the next page. With category, only that top-level category. The first page also lists every nearby category with its product count, whatever category is. Each product lists up to 10 nearby stores ordered by sort. Exact quantities are never returned.
+// @Description Every product sold by stores within the radius, by name, one page at a time: pass next_cursor as cursor for the next page. With category, only that top-level category. The first page also lists every nearby category with its product count, whatever category is. Each product lists up to 10 nearby stores ordered by sort. Exact quantities are never returned: max_order_quantity is how many a customer can order, at most 10.
 // @Tags Marketplace
 // @Produce json
 // @Param lat query number true "Latitude, -90 to 90"

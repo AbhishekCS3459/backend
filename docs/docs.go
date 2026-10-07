@@ -416,7 +416,7 @@ const docTemplate = `{
         },
         "/api/marketplace/nearby": {
             "get": {
-                "description": "Products sold by stores within the radius, grouped by top-level category (largest first, at most 20). In each category, products stocked by more nearby stores come first. With category, lists every product in that category by name, one page at a time: pass next_cursor as cursor for the next page. Each product lists up to 10 nearby stores ordered by sort. Exact quantities are never returned.",
+                "description": "Products sold by stores within the radius, grouped by top-level category (largest first, at most 20). In each category, products stocked by more nearby stores come first. With category, lists every product in that category by name, one page at a time: pass next_cursor as cursor for the next page. Each product lists up to 10 nearby stores ordered by sort. Exact quantities are never returned: max_order_quantity is how many a customer can order, at most 10.",
                 "produces": [
                     "application/json"
                 ],
@@ -493,7 +493,7 @@ const docTemplate = `{
         },
         "/api/marketplace/nearby/products": {
             "get": {
-                "description": "Every product sold by stores within the radius, by name, one page at a time: pass next_cursor as cursor for the next page. With category, only that top-level category. The first page also lists every nearby category with its product count, whatever category is. Each product lists up to 10 nearby stores ordered by sort. Exact quantities are never returned.",
+                "description": "Every product sold by stores within the radius, by name, one page at a time: pass next_cursor as cursor for the next page. With category, only that top-level category. The first page also lists every nearby category with its product count, whatever category is. Each product lists up to 10 nearby stores ordered by sort. Exact quantities are never returned: max_order_quantity is how many a customer can order, at most 10.",
                 "produces": [
                     "application/json"
                 ],
@@ -702,7 +702,7 @@ const docTemplate = `{
         },
         "/api/marketplace/products/{catalogKey}/live": {
             "get": {
-                "description": "Server-sent events for one product. \"ready\" (data {}) once the stream is live: fetch the product now, so no change falls between the snapshot and the stream. \"offer\" carries one store's new price and availability bucket, newest first per store; apply it only if its version is higher than the one you have, and drop the store when searchable is false. \"resync\" (data {}) means changes may have been missed: fetch the product again. The stream ends after a few minutes and the browser reconnects; each \"ready\" calls for a fresh fetch. 503 means live updates are off: poll instead. Exact quantities are never sent.",
+                "description": "Server-sent events for one product. \"ready\" (data {}) once the stream is live: fetch the product now, so no change falls between the snapshot and the stream. \"offer\" carries one store's new price, availability bucket and max_order_quantity (at most 10), newest first per store; apply it only if its version is higher than the one you have, and drop the store when searchable is false. \"resync\" (data {}) means changes may have been missed: fetch the product again. The stream ends after a few minutes and the browser reconnects; each \"ready\" calls for a fresh fetch. 503 means live updates are off: poll instead. Exact quantities are never sent.",
                 "produces": [
                     "text/event-stream"
                 ],
@@ -761,7 +761,7 @@ const docTemplate = `{
         },
         "/api/marketplace/search": {
             "get": {
-                "description": "Matches products by name, brand or category (typos tolerated: \"cocacola\" finds \"Coca-Cola\"), then lists up to 10 nearby stores selling each, with the store's price, distance and availability bucket. Stock not confirmed within the staleness window shows as CONFIRM_WITH_STORE. Exact quantities are never returned.",
+                "description": "Matches products by name, brand or category (typos tolerated: \"cocacola\" finds \"Coca-Cola\"), then lists up to 10 nearby stores selling each, with the store's price, distance and availability bucket. Stock not confirmed within the staleness window shows as CONFIRM_WITH_STORE. Exact quantities are never returned: max_order_quantity is how many a customer can order, at most 10.",
                 "produces": [
                     "application/json"
                 ],
@@ -2200,6 +2200,10 @@ const docTemplate = `{
                 "lng": {
                     "type": "number"
                 },
+                "max_order_quantity": {
+                    "description": "MaxOrderQuantity is how many a customer can order here right now, at\nmost availability.MaxOrderQuantity, so larger stock stays hidden.",
+                    "type": "integer"
+                },
                 "price": {
                     "type": "number"
                 },
@@ -2238,6 +2242,10 @@ const docTemplate = `{
                 },
                 "last_stock_update_at": {
                     "type": "string"
+                },
+                "max_order_quantity": {
+                    "description": "MaxOrderQuantity: see StoreOffer.MaxOrderQuantity.",
+                    "type": "integer"
                 },
                 "name": {
                     "type": "string"
@@ -2285,6 +2293,10 @@ const docTemplate = `{
                 },
                 "last_stock_update_at": {
                     "type": "string"
+                },
+                "max_order_quantity": {
+                    "description": "MaxOrderQuantity is how many a customer can order, at most availability.MaxOrderQuantity.",
+                    "type": "integer"
                 },
                 "price": {
                     "type": "number"

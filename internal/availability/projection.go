@@ -187,7 +187,7 @@ func expectedRows(db *gorm.DB, ids []uuid.UUID) ([]Row, error) {
 		LEFT JOIN store_location l ON l.store_id = i.store_id
 		LEFT JOIN LATERAL (
 			SELECT created_at FROM inventory_transaction
-			WHERE inventory_id = i.id
+			WHERE inventory_id = i.id AND type NOT IN (`+ReservationTxTypes+`)
 			ORDER BY seq DESC
 			LIMIT 1
 		) t ON TRUE

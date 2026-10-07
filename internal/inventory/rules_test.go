@@ -38,6 +38,28 @@ func TestSaleChange(t *testing.T) {
 	}
 }
 
+func TestOrderChanges(t *testing.T) {
+	c, err := reserveChange(4)
+	require.NoError(t, err)
+	assert.Equal(t, change{Type: TypeOrderReserved, ReservedDelta: 4}, c)
+
+	c, err = releaseChange(4)
+	require.NoError(t, err)
+	assert.Equal(t, change{Type: TypeOrderReleased, ReservedDelta: -4}, c)
+
+	c, err = pickupChange(4)
+	require.NoError(t, err)
+	assert.Equal(t, change{Type: TypeOrderPickup, Delta: -4, ReservedDelta: -4}, c)
+
+	for _, build := range []func(int) (change, error){reserveChange, releaseChange, pickupChange} {
+		for _, qty := range []int{0, -1, MaxChange + 1} {
+			_, err := build(qty)
+			var ve *ValidationError
+			assert.True(t, errors.As(err, &ve), "quantity %d should be rejected", qty)
+		}
+	}
+}
+
 func TestAdjustChangeMode(t *testing.T) {
 	current := Stock{OnHand: 20, Reserved: 2}
 
@@ -167,6 +189,36 @@ func TestApply(t *testing.T) {
 			current: Stock{OnHand: 1},
 			change:  change{Type: TypeOfflineSale, Delta: -2},
 			wantErr: "Cannot sell 2: only 1 unit is free to sell.",
+		},
+		{
+			name:    "reserve free units",
+			current: Stock{OnHand: 5, Reserved: 2},
+			change:  change{Type: TypeOrderReserved, ReservedDelta: 3},
+			want:    Stock{OnHand: 5, Reserved: 5},
+		},
+		{
+			name:    "reserve more than free",
+			current: Stock{OnHand: 5, Reserved: 4},
+			change:  change{Type: TypeOrderReserved, ReservedDelta: 2},
+			wantErr: "Cannot reserve 2: only 1 unit is free.",
+		},
+		{
+			name:    "release",
+			current: Stock{OnHand: 5, Reserved: 3},
+			change:  change{Type: TypeOrderReleased, ReservedDelta: -3},
+			want:    Stock{OnHand: 5, Reserved: 0},
+		},
+		{
+			name:    "release more than reserved",
+			current: Stock{OnHand: 5, Reserved: 1},
+			change:  change{Type: TypeOrderReleased, ReservedDelta: -2},
+			wantErr: "Cannot free 2: only 1 unit is reserved.",
+		},
+		{
+			name:    "pickup takes reserved units off the shelf",
+			current: Stock{OnHand: 5, Reserved: 3},
+			change:  change{Type: TypeOrderPickup, Delta: -3, ReservedDelta: -3},
+			want:    Stock{OnHand: 2, Reserved: 0},
 		},
 		{
 			name:    "above maximum",

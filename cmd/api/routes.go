@@ -14,6 +14,7 @@ import (
 	"github.com/AbhishekCS3459/find-me-backend/internal/listproducts"
 	"github.com/AbhishekCS3459/find-me-backend/internal/marketplace"
 	"github.com/AbhishekCS3459/find-me-backend/internal/marketplace/live"
+	"github.com/AbhishekCS3459/find-me-backend/internal/orders"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/database"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/health"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/middleware"
@@ -39,9 +40,10 @@ import (
 // when Redis is not configured; health then reports it disabled.
 // hub carries live inventory changes to open event streams. gateway carries
 // availability changes to customers; nil turns live marketplace streams off.
+// ordersHandler serves customer orders, store order queues and payment webhooks.
 func SetupRoutes(
 	db *database.DB, mongoClient *mongodb.Client, rdb *redis.Client, cfg *Config,
-	hub *realtime.Hub, gateway *live.Gateway,
+	hub *realtime.Hub, gateway *live.Gateway, ordersHandler *orders.Handler,
 ) *chi.Mux {
 	router := chi.NewRouter()
 
@@ -56,7 +58,7 @@ func SetupRoutes(
 	router.Use(chiMiddleware.Compress(5))      // Response compression
 	// Request timeout; event streams end on their own (see realtime.StreamOptions).
 	router.Use(middleware.TimeoutExcept(60*time.Second, func(r *http.Request) bool {
-		return inventory.IsEventsRequest(r) || live.IsStreamRequest(r)
+		return inventory.IsEventsRequest(r) || orders.IsEventsRequest(r) || live.IsStreamRequest(r)
 	}))
 
 	corsConfig := &middleware.CORSConfig{
@@ -177,7 +179,13 @@ func SetupRoutes(
 		r.Route("/stores/{storeID}/analytics", func(r chi.Router) {
 			r.Mount("/", analyticsHandler.Routes())
 		})
+		r.Route("/stores/{storeID}/orders", func(r chi.Router) {
+			r.Mount("/", ordersHandler.StoreRoutes())
+		})
 		r.Mount("/stores", storeHandler.Routes())
+		r.Mount("/orders", ordersHandler.CustomerRoutes())
+		// Public (see isPublicRoute): gateways sign their webhooks instead.
+		r.Mount("/payments/webhooks", ordersHandler.WebhookRoutes())
 		r.Mount("/team", teamHandler.Routes())
 		r.Mount("/truecaller", truecallerHandler.Routes())
 		// Public (see isPublicRoute); under the global rate limit like everything else.

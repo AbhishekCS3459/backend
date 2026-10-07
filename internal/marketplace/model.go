@@ -2,7 +2,8 @@
 // location, then see which nearby stores sell it, at what price and how
 // available. It only reads: products from catalog_item, stores' prices and
 // stock from store_product_availability, which every inventory write keeps
-// current in the same transaction. Customers never see an exact quantity.
+// current in the same transaction. Customers never see an exact quantity,
+// only how many they can order, up to availability.MaxOrderQuantity.
 package marketplace
 
 import (
@@ -104,7 +105,10 @@ type StoreOffer struct {
 	Lng                float64   `json:"lng"`
 	Price              float64   `json:"price"`
 	AvailabilityBucket string    `json:"availability_bucket"`
-	LastStockUpdateAt  time.Time `json:"last_stock_update_at"`
+	// MaxOrderQuantity is how many a customer can order here right now, at
+	// most availability.MaxOrderQuantity, so larger stock stays hidden.
+	MaxOrderQuantity  int       `json:"max_order_quantity"`
+	LastStockUpdateAt time.Time `json:"last_stock_update_at"`
 	// Version grows with every change to this store's row; a live update with
 	// a version no higher than this is already reflected.
 	Version int64  `json:"version"`
@@ -188,7 +192,9 @@ type StoreProduct struct {
 	StoreID            uuid.UUID `json:"store_id"`
 	Price              float64   `json:"price"`
 	AvailabilityBucket string    `json:"availability_bucket"`
-	LastStockUpdateAt  time.Time `json:"last_stock_update_at"`
+	// MaxOrderQuantity: see StoreOffer.MaxOrderQuantity.
+	MaxOrderQuantity  int       `json:"max_order_quantity"`
+	LastStockUpdateAt time.Time `json:"last_stock_update_at"`
 	// Version: see StoreOffer.Version.
 	Version int64  `json:"version"`
 	Debug   *Debug `json:"debug,omitempty"`

@@ -21,6 +21,8 @@ type Update struct {
 	StoreID            uuid.UUID `json:"store_id"`
 	Price              float64   `json:"price"`
 	AvailabilityBucket string    `json:"availability_bucket"`
+	// MaxOrderQuantity is how many a customer can order, at most availability.MaxOrderQuantity.
+	MaxOrderQuantity int `json:"max_order_quantity"`
 	// Searchable is false once customers can no longer find the product at the store.
 	Searchable        bool      `json:"searchable"`
 	LastStockUpdateAt time.Time `json:"last_stock_update_at"`

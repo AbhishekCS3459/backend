@@ -9,8 +9,10 @@ import (
 type change struct {
 	Type    TxType
 	Reason  *Reason
-	Delta   int
+	Delta   int // on-hand change
 	Counted *int
+	// ReservedDelta is the reserved change; only order entries move it.
+	ReservedDelta int
 }
 
 func receiveChange(quantity int) (change, error) {
@@ -25,6 +27,37 @@ func saleChange(quantity int) (change, error) {
 		return change{}, &ValidationError{Message: fmt.Sprintf("quantity must be between 1 and %d", MaxChange)}
 	}
 	return change{Type: TypeOfflineSale, Delta: -quantity}, nil
+}
+
+func orderQuantity(quantity int) error {
+	if quantity <= 0 || quantity > MaxChange {
+		return &ValidationError{Message: fmt.Sprintf("quantity must be between 1 and %d", MaxChange)}
+	}
+	return nil
+}
+
+// reserveChange holds units for an order; they stay on hand but can't be sold.
+func reserveChange(quantity int) (change, error) {
+	if err := orderQuantity(quantity); err != nil {
+		return change{}, err
+	}
+	return change{Type: TypeOrderReserved, ReservedDelta: quantity}, nil
+}
+
+// releaseChange frees units an order no longer needs.
+func releaseChange(quantity int) (change, error) {
+	if err := orderQuantity(quantity); err != nil {
+		return change{}, err
+	}
+	return change{Type: TypeOrderReleased, ReservedDelta: -quantity}, nil
+}
+
+// pickupChange hands reserved units to the customer.
+func pickupChange(quantity int) (change, error) {
+	if err := orderQuantity(quantity); err != nil {
+		return change{}, err
+	}
+	return change{Type: TypeOrderPickup, Delta: -quantity, ReservedDelta: -quantity}, nil
 }
 
 // adjustChange turns an adjustment into a change against the current, locked
@@ -66,12 +99,20 @@ func adjustChange(current Stock, req AdjustRequest) (change, error) {
 // apply returns the stock after the change, refusing anything that would take
 // on-hand stock below zero or below what is already reserved for orders.
 func apply(current Stock, c change) (Stock, error) {
-	next := Stock{OnHand: current.OnHand + c.Delta, Reserved: current.Reserved}
+	next := Stock{OnHand: current.OnHand + c.Delta, Reserved: current.Reserved + c.ReservedDelta}
 	if next.OnHand > maxOnHand {
 		return Stock{}, &StockError{Message: "stock would exceed the maximum allowed quantity"}
 	}
+	if next.Reserved < 0 {
+		return Stock{}, &StockError{Message: fmt.Sprintf(
+			"Cannot free %d: only %d %s reserved.", -c.ReservedDelta, current.Reserved, unitsAre(current.Reserved))}
+	}
 	if next.OnHand >= next.Reserved {
 		return next, nil
+	}
+	if c.Type == TypeOrderReserved {
+		return Stock{}, &StockError{Message: fmt.Sprintf(
+			"Cannot reserve %d: only %d %s free.", c.ReservedDelta, max(current.Available(), 0), unitsAre(current.Available()))}
 	}
 	if c.Type == TypeOfflineSale {
 		msg := fmt.Sprintf("Cannot sell %d: only %d %s free to sell", -c.Delta, max(current.Available(), 0), unitsAre(current.Available()))

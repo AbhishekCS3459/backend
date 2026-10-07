@@ -164,6 +164,8 @@ func isPublicRoute(path string) bool {
 		// Customer discovery needs no account. The trailing slash keeps a
 		// future /api/marketplace-admin route from becoming public by prefix.
 		"/api/marketplace/",
+		// Payment gateways call these; each provider verifies its own signature.
+		"/api/payments/webhooks/",
 		"/swagger",
 	}
 

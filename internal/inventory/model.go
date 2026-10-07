@@ -18,6 +18,11 @@ const (
 	TypeStockReceived  TxType = "STOCK_RECEIVED"
 	TypeAdjustment     TxType = "ADJUSTMENT"
 	TypeOfflineSale    TxType = "OFFLINE_SALE"
+	// TypeOrderReserved and TypeOrderReleased move only reserved stock.
+	TypeOrderReserved TxType = "ORDER_RESERVED"
+	TypeOrderReleased TxType = "ORDER_RELEASED"
+	// TypeOrderPickup hands reserved units to the customer, taking them out of stock.
+	TypeOrderPickup TxType = "ORDER_PICKUP"
 )
 
 type Reason string
@@ -60,6 +65,8 @@ var (
 	ErrUnlisted      = errors.New("this product was removed from the store; add it back before changing its stock")
 	ErrAlreadyListed = errors.New("product is already listed in this store")
 	ErrKeyReused     = errors.New("this idempotency key was already used for a different request")
+	// ErrNotForSale means the store marked the product unavailable.
+	ErrNotForSale = errors.New("this product is not for sale at the moment")
 )
 
 // ValidationError is a malformed request (400).
@@ -112,6 +119,7 @@ type Transaction struct {
 	Reference       *string    `json:"reference"`
 	Note            *string    `json:"note"`
 	BatchID         *uuid.UUID `json:"batch_id"`
+	OrderID         *uuid.UUID `json:"order_id"`
 	CreatedBy       *Actor     `json:"created_by"`
 	CreatedAt       time.Time  `json:"created_at"`
 }

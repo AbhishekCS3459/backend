@@ -276,6 +276,68 @@ func (l Ledger) Adjust(tx *gorm.DB, storeID, variantID uuid.UUID, req AdjustRequ
 	return l.record(tx, row, c, entryMeta{note: req.Note, actor: actor})
 }
 
+// OrderInput moves an online order's units of one product.
+type OrderInput struct {
+	StoreID   uuid.UUID
+	VariantID uuid.UUID
+	OrderID   uuid.UUID
+	Quantity  int
+	Reference string // the order code
+	// UnitPrice is what the customer paid per unit; recorded on pickups so
+	// sales reports use the order's price, not the store's current one.
+	UnitPrice *float64
+	Actor     Actor
+}
+
+// Reserve holds units for an order. Only free units can be held, so units
+// reserved for other orders are never promised twice.
+func (l Ledger) Reserve(tx *gorm.DB, in OrderInput) (Result, error) {
+	c, err := reserveChange(in.Quantity)
+	if err != nil {
+		return Result{}, err
+	}
+	row, err := lockListed(tx, in.StoreID, in.VariantID)
+	if err != nil {
+		return Result{}, err
+	}
+	if !row.IsAvailable {
+		return Result{}, ErrNotForSale
+	}
+	return l.record(tx, row, c, orderMeta(in))
+}
+
+// Release frees units an order held. It works on unlisted products too, so an
+// order can always give its units back.
+func (l Ledger) Release(tx *gorm.DB, in OrderInput) (Result, error) {
+	c, err := releaseChange(in.Quantity)
+	if err != nil {
+		return Result{}, err
+	}
+	row, err := findRow(tx, in.StoreID, in.VariantID, true)
+	if err != nil {
+		return Result{}, err
+	}
+	return l.record(tx, row, c, orderMeta(in))
+}
+
+// Pickup takes an order's held units out of stock as the customer collects them.
+func (l Ledger) Pickup(tx *gorm.DB, in OrderInput) (Result, error) {
+	c, err := pickupChange(in.Quantity)
+	if err != nil {
+		return Result{}, err
+	}
+	row, err := findRow(tx, in.StoreID, in.VariantID, true)
+	if err != nil {
+		return Result{}, err
+	}
+	return l.record(tx, row, c, orderMeta(in))
+}
+
+func orderMeta(in OrderInput) entryMeta {
+	orderID := in.OrderID
+	return entryMeta{reference: in.Reference, orderID: &orderID, unitPrice: in.UnitPrice, actor: in.Actor}
+}
+
 func lockListed(tx *gorm.DB, storeID, variantID uuid.UUID) (*inventoryRow, error) {
 	row, err := findRow(tx, storeID, variantID, true)
 	if err != nil {
@@ -291,6 +353,8 @@ type entryMeta struct {
 	reference string
 	note      string
 	batchID   *uuid.UUID
+	orderID   *uuid.UUID
+	unitPrice *float64
 	actor     Actor
 }
 
@@ -322,6 +386,7 @@ func (Ledger) record(tx *gorm.DB, row *inventoryRow, c change, meta entryMeta) (
 		Reference:       optional(meta.reference),
 		Note:            optional(meta.note),
 		BatchID:         meta.batchID,
+		OrderID:         meta.orderID,
 		CreatedAt:       now,
 	}
 	var createdBy *uuid.UUID
@@ -330,17 +395,19 @@ func (Ledger) record(tx *gorm.DB, row *inventoryRow, c change, meta entryMeta) (
 		entry.CreatedBy = &actor
 		createdBy = &actor.ID
 	}
-	// A sale keeps the store's price at that moment, so sales reports don't change with later prices.
+	// A sale keeps its price (the order's, or the store's at that moment), so
+	// sales reports don't change with later prices.
 	err = tx.Exec(`
 		INSERT INTO inventory_transaction (
 			id, inventory_id, store_id, product_variant_id, type, reason, quantity,
 			before_on_hand, after_on_hand, before_reserved, after_reserved, counted_quantity,
-			reference, note, batch_id, created_by, created_at, unit_price
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-			(SELECT price FROM inventory WHERE id = ? AND ?::text = 'OFFLINE_SALE'))`,
+			reference, note, batch_id, order_id, created_by, created_at, unit_price
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+			COALESCE(?::numeric, (SELECT price FROM inventory WHERE id = ? AND ?::text = 'OFFLINE_SALE')))`,
 		entry.ID, row.ID, row.StoreID, row.ProductVariantID, entry.Type, entry.Reason, entry.Quantity,
 		entry.BeforeOnHand, entry.AfterOnHand, entry.BeforeReserved, entry.AfterReserved, entry.CountedQuantity,
-		entry.Reference, entry.Note, entry.BatchID, createdBy, entry.CreatedAt, row.ID, entry.Type).Error
+		entry.Reference, entry.Note, entry.BatchID, entry.OrderID, createdBy, entry.CreatedAt,
+		meta.unitPrice, row.ID, entry.Type).Error
 	if err != nil {
 		return Result{}, fmt.Errorf("record inventory transaction: %w", err)
 	}

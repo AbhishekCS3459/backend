@@ -19,10 +19,13 @@ import (
 	"github.com/AbhishekCS3459/find-me-backend/internal/identity"
 	"github.com/AbhishekCS3459/find-me-backend/internal/inventory"
 	"github.com/AbhishekCS3459/find-me-backend/internal/marketplace/live"
+	"github.com/AbhishekCS3459/find-me-backend/internal/orders"
+	"github.com/AbhishekCS3459/find-me-backend/internal/payment"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/database"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/mongodb"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/outbox"
 	"github.com/AbhishekCS3459/find-me-backend/internal/platform/realtime"
+	"github.com/AbhishekCS3459/find-me-backend/internal/storeaccess"
 )
 
 // @title           Find Me API
@@ -132,11 +135,24 @@ func run() error {
 	defer stopPublisher()
 
 	hub := realtime.NewHub(maxLiveStreams)
-	stopListener := startInventoryListener(db, hub)
+	stopListener := startListener(db, inventory.ChangesChannel, hub)
 	defer stopListener()
 
+	orderHub := realtime.NewHub(maxLiveStreams)
+	stopOrderListener := startListener(db, orders.ChangesChannel, orderHub)
+	defer stopOrderListener()
+	orderService := orders.NewService(db.Gorm, inventory.NewLedger(), storeaccess.NewResolver(db.Gorm),
+		payment.NewDummy(), orders.Config{
+			PaymentHold:   cfg.OrderPaymentHold,
+			AcceptTimeout: cfg.OrderAcceptTimeout,
+			PickupWindow:  cfg.OrderPickupWindow,
+			PickupSecret:  []byte(cfg.OrderPickupSecret),
+		})
+	stopSweeper := startOrderSweeper(orderService, cfg)
+	defer stopSweeper()
+
 	// Setup routes
-	router := SetupRoutes(db, mongoClient, rdb, cfg, hub, gateway)
+	router := SetupRoutes(db, mongoClient, rdb, cfg, hub, gateway, orders.NewHandler(orderService, orderHub))
 
 	// Create HTTP server
 	server := &http.Server{
@@ -148,6 +164,7 @@ func run() error {
 	}
 	// Shutdown waits for open requests; event streams would otherwise hold it until its deadline.
 	server.RegisterOnShutdown(hub.Close)
+	server.RegisterOnShutdown(orderHub.Close)
 	if gateway != nil {
 		server.RegisterOnShutdown(gateway.Close)
 	}
@@ -207,7 +224,26 @@ func startOutboxPublisher(db *database.DB, sink outbox.Sink, cfg *Config) (stop 
 	}
 }
 
-// maxLiveStreams caps the retailer inventory event streams one instance holds open.
+// startOrderSweeper closes overdue orders and retries refunds until the
+// returned stop function is called; stop waits for the current pass.
+func startOrderSweeper(svc *orders.Service, cfg *Config) (stop func()) {
+	if !cfg.OrderSweeperEnabled {
+		log.Info().Msg("order sweeper disabled")
+		return func() {}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		svc.RunSweeper(ctx, cfg.OrderSweepInterval)
+	}()
+	return func() {
+		cancel()
+		<-done
+	}
+}
+
+// maxLiveStreams caps the retailer event streams (per kind) one instance holds open.
 const maxLiveStreams = 10000
 
 // maxMarketplaceStreams caps the customer availability streams one instance holds open.
@@ -236,14 +272,14 @@ func connectRedis(ctx context.Context, rawURL string) *redis.Client {
 	return client
 }
 
-// startInventoryListener relays inventory changes committed by any instance to
-// this instance's event streams, until the returned stop function is called.
-func startInventoryListener(db *database.DB, hub *realtime.Hub) (stop func()) {
+// startListener relays changes committed by any instance on channel to this
+// instance's event streams, until the returned stop function is called.
+func startListener(db *database.DB, channel string, hub *realtime.Hub) (stop func()) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		realtime.Listen(ctx, db.Pool.Config().ConnConfig, inventory.ChangesChannel, hub)
+		realtime.Listen(ctx, db.Pool.Config().ConnConfig, channel, hub)
 	}()
 	return func() {
 		cancel()

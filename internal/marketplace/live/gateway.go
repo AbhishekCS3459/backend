@@ -276,6 +276,7 @@ func (g *Gateway) dispatch(channel string, u Update) {
 
 func visibleChange(prev, next Update) bool {
 	return prev.AvailabilityBucket != next.AvailabilityBucket ||
+		prev.MaxOrderQuantity != next.MaxOrderQuantity ||
 		prev.Price != next.Price ||
 		prev.Searchable != next.Searchable ||
 		next.LastStockUpdateAt.Sub(prev.LastStockUpdateAt) >= minTimestampStep

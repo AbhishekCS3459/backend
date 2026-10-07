@@ -39,7 +39,7 @@ func testRow(key string, store uuid.UUID, version int64) availability.Row {
 		StoreID:           store,
 		CatalogKey:        key,
 		Price:             "42.50",
-		AvailableQty:      7,
+		AvailableQty:      17,
 		Bucket:            availability.InStock,
 		Searchable:        true,
 		LastStockUpdateAt: time.Now().UTC().Truncate(time.Second),
@@ -53,11 +53,18 @@ func TestUpdateFromLeavesOutQuantity(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, Update{
 		CatalogKey: "todayz:1", StoreID: store, Price: 42.5, AvailabilityBucket: "IN_STOCK",
-		Searchable: true, LastStockUpdateAt: u.LastStockUpdateAt, Version: 3,
+		MaxOrderQuantity: availability.MaxOrderQuantity,
+		Searchable:       true, LastStockUpdateAt: u.LastStockUpdateAt, Version: 3,
 	}, u)
 	data, err := json.Marshal(u)
 	require.NoError(t, err)
 	assert.NotContains(t, string(data), "available_qty")
+
+	few := testRow("todayz:1", store, 4)
+	few.AvailableQty = 3
+	u, ok = updateFrom(inventoryChanged(t, few))
+	require.True(t, ok)
+	assert.Equal(t, 3, u.MaxOrderQuantity, "below the cap customers see how many they can order")
 }
 
 func TestUpdateFromSkipsUnusableEvents(t *testing.T) {
@@ -84,6 +91,7 @@ func TestVisibleChange(t *testing.T) {
 
 	for name, change := range map[string]func(*Update){
 		"bucket":     func(u *Update) { u.AvailabilityBucket = "OUT" },
+		"orderable":  func(u *Update) { u.MaxOrderQuantity = 2 },
 		"price":      func(u *Update) { u.Price = 11 },
 		"searchable": func(u *Update) { u.Searchable = false },
 		"stock time": func(u *Update) { u.LastStockUpdateAt = u.LastStockUpdateAt.Add(minTimestampStep) },
@@ -187,7 +195,7 @@ func TestSinkToGateway(t *testing.T) {
 		older.Bucket = availability.Out
 		quantityOnly := rowA
 		quantityOnly.Version = 6
-		quantityOnly.AvailableQty = 6
+		quantityOnly.AvailableQty = 16
 		require.Empty(t, sink.Publish(ctx, []outbox.Message{
 			inventoryChanged(t, older), inventoryChanged(t, quantityOnly),
 		}))

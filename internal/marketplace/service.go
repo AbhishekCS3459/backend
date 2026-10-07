@@ -10,6 +10,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
+
+	"github.com/AbhishekCS3459/find-me-backend/internal/availability"
 )
 
 type Service interface {
@@ -135,6 +137,7 @@ func groupOffers(offers []offerRow, debug bool) map[string][]StoreOffer {
 			Lng:                o.Lng,
 			Price:              o.Price,
 			AvailabilityBucket: o.AvailabilityBucket,
+			MaxOrderQuantity:   availability.OrderableQuantity(o.AvailableQty),
 			LastStockUpdateAt:  o.LastStockUpdateAt,
 			Version:            o.Version,
 			Debug:              debugFields(debug, o.AvailableQty, o.Version),
@@ -435,6 +438,7 @@ func toStoreProduct(row storeProductRow, debug bool) StoreProduct {
 		StoreID:            row.StoreID,
 		Price:              row.Price,
 		AvailabilityBucket: row.AvailabilityBucket,
+		MaxOrderQuantity:   availability.OrderableQuantity(row.AvailableQty),
 		LastStockUpdateAt:  row.LastStockUpdateAt,
 		Version:            row.Version,
 		Debug:              debugFields(debug, row.AvailableQty, row.Version),

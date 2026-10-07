@@ -64,7 +64,7 @@ func IsStreamRequest(r *http.Request) bool {
 
 // Stream sends a product's availability changes as they happen.
 // @Summary Live availability of a product
-// @Description Server-sent events for one product. "ready" (data {}) once the stream is live: fetch the product now, so no change falls between the snapshot and the stream. "offer" carries one store's new price and availability bucket, newest first per store; apply it only if its version is higher than the one you have, and drop the store when searchable is false. "resync" (data {}) means changes may have been missed: fetch the product again. The stream ends after a few minutes and the browser reconnects; each "ready" calls for a fresh fetch. 503 means live updates are off: poll instead. Exact quantities are never sent.
+// @Description Server-sent events for one product. "ready" (data {}) once the stream is live: fetch the product now, so no change falls between the snapshot and the stream. "offer" carries one store's new price, availability bucket and max_order_quantity (at most 10), newest first per store; apply it only if its version is higher than the one you have, and drop the store when searchable is false. "resync" (data {}) means changes may have been missed: fetch the product again. The stream ends after a few minutes and the browser reconnects; each "ready" calls for a fresh fetch. 503 means live updates are off: poll instead. Exact quantities are never sent.
 // @Tags Marketplace
 // @Produce text/event-stream
 // @Param catalogKey path string true "The product's catalog_key, URL-encoded (todayz%3A776963)"

@@ -18,6 +18,21 @@ const (
 	ConfirmWithStore Bucket = "CONFIRM_WITH_STORE"
 )
 
+// ReservationTxTypes lists, as SQL, the inventory_transaction types that only
+// hold or free units for online orders. Nobody looked at the shelf, so they
+// don't confirm stock and are skipped when finding the last stock update.
+const ReservationTxTypes = `'ORDER_RESERVED', 'ORDER_RELEASED'`
+
+// MaxOrderQuantity is the most of one product a customer can order at once.
+// Customers are told how many they can order up to this many, so it is also
+// the most of an exact count they ever learn.
+const MaxOrderQuantity = 10
+
+// OrderableQuantity is how many of the available units a customer can order.
+func OrderableQuantity(available int) int {
+	return min(max(available, 0), MaxOrderQuantity)
+}
+
 // BucketFor classifies sellable stock. The retailer's stock status uses it
 // too, so the retailer and customers always see the same level.
 func BucketFor(available, lowStockThreshold int) Bucket {

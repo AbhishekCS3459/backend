@@ -5,9 +5,13 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/AbhishekCS3459/find-me-backend/internal/availability"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
+
+// saleTypes are counter sales and online orders handed over at pickup.
+const saleTypes = `'OFFLINE_SALE', 'ORDER_PICKUP'`
 
 // Repository reads one store's ledger. Times are instants; callers pass the
 // store's time zone only where rows are grouped by local hour or day.
@@ -58,7 +62,7 @@ func (r *repository) Sales(ctx context.Context, storeID uuid.UUID, from, to time
 			COALESCE(BOOL_OR(t.unit_price IS NULL), FALSE) AS estimated
 		FROM inventory_transaction t
 		JOIN inventory i ON i.id = t.inventory_id
-		WHERE t.store_id = ? AND t.type = 'OFFLINE_SALE' AND t.created_at >= ? AND t.created_at < ?`,
+		WHERE t.store_id = ? AND t.type IN (`+saleTypes+`) AND t.created_at >= ? AND t.created_at < ?`,
 		storeID, from, to).Scan(&row).Error
 	if err != nil {
 		return Sales{}, fmt.Errorf("load sales: %w", err)
@@ -126,7 +130,7 @@ func (r *repository) SalesBy(ctx context.Context, storeID uuid.UUID, from, to ti
 			SUM(`+saleValue+`)::float8 AS revenue
 		FROM inventory_transaction t
 		JOIN inventory i ON i.id = t.inventory_id
-		WHERE t.store_id = ? AND t.type = 'OFFLINE_SALE' AND t.created_at >= ? AND t.created_at < ?
+		WHERE t.store_id = ? AND t.type IN (`+saleTypes+`) AND t.created_at >= ? AND t.created_at < ?
 		GROUP BY 1
 		ORDER BY 1`, unit, tz, storeID, from, to).Rows()
 	if err != nil {
@@ -160,7 +164,7 @@ func (r *repository) TopSellers(ctx context.Context, storeID uuid.UUID, from, to
 		FROM inventory_transaction t
 		JOIN inventory i ON i.id = t.inventory_id
 		`+productName+`
-		WHERE t.store_id = ? AND t.type = 'OFFLINE_SALE' AND t.created_at >= ? AND t.created_at < ?
+		WHERE t.store_id = ? AND t.type IN (`+saleTypes+`) AND t.created_at >= ? AND t.created_at < ?
 		GROUP BY i.product_variant_id, p.name
 		ORDER BY units DESC, revenue DESC, p.name
 		LIMIT ?`, storeID, from, to, limit).Scan(&sellers).Error
@@ -180,12 +184,12 @@ func (r *repository) SlowMovers(ctx context.Context, storeID uuid.UUID, from, to
 		`+productName+`
 		LEFT JOIN (
 			SELECT inventory_id, SUM(-quantity) AS units FROM inventory_transaction
-			WHERE store_id = ? AND type = 'OFFLINE_SALE' AND created_at >= ? AND created_at < ?
+			WHERE store_id = ? AND type IN (`+saleTypes+`) AND created_at >= ? AND created_at < ?
 			GROUP BY inventory_id
 		) sold ON sold.inventory_id = i.id
 		LEFT JOIN LATERAL (
 			SELECT created_at AS at FROM inventory_transaction
-			WHERE inventory_id = i.id AND type = 'OFFLINE_SALE'
+			WHERE inventory_id = i.id AND type IN (`+saleTypes+`)
 			ORDER BY seq DESC
 			LIMIT 1
 		) last_sale ON TRUE
@@ -248,7 +252,7 @@ func (r *repository) Stale(ctx context.Context, storeID uuid.UUID, before time.T
 		`+productName+`
 		LEFT JOIN LATERAL (
 			SELECT created_at FROM inventory_transaction
-			WHERE inventory_id = i.id
+			WHERE inventory_id = i.id AND type NOT IN (`+availability.ReservationTxTypes+`)
 			ORDER BY seq DESC
 			LIMIT 1
 		) last ON TRUE
@@ -270,7 +274,7 @@ func (r *repository) Activity(ctx context.Context, storeID uuid.UUID) (Activity,
 				WHERE store_id = ? AND unlisted_at IS NULL AND is_available
 					AND on_hand_quantity - reserved_quantity > 0) AS listed_with_stock,
 			(SELECT MAX(created_at) FROM inventory_transaction
-				WHERE store_id = ? AND type = 'OFFLINE_SALE') AS last_sale_at,
+				WHERE store_id = ? AND type IN (`+saleTypes+`)) AS last_sale_at,
 			(SELECT MIN(listed_at) FROM inventory
 				WHERE store_id = ? AND unlisted_at IS NULL) AS first_listed_at`,
 		storeID, storeID, storeID).Scan(&a).Error

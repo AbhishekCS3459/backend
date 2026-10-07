@@ -217,6 +217,7 @@ type historyRow struct {
 	Reference       *string
 	Note            *string
 	BatchID         *uuid.UUID
+	OrderID         *uuid.UUID
 	CreatedBy       *uuid.UUID
 	CreatedByName   string
 	CreatedAt       time.Time
@@ -240,7 +241,7 @@ func (s *service) History(
 
 	sql := `
 		SELECT t.id, t.seq, t.type, t.reason, t.quantity, t.before_on_hand, t.after_on_hand,
-			t.before_reserved, t.after_reserved, t.counted_quantity, t.reference, t.note, t.batch_id,
+			t.before_reserved, t.after_reserved, t.counted_quantity, t.reference, t.note, t.batch_id, t.order_id,
 			t.created_by, COALESCE(NULLIF(u.full_name, ''), u.phone, '') AS created_by_name, t.created_at
 		FROM inventory_transaction t
 		LEFT JOIN users u ON u.id = t.created_by
@@ -272,7 +273,7 @@ func (s *service) History(
 			BeforeOnHand: r.BeforeOnHand, AfterOnHand: r.AfterOnHand,
 			BeforeReserved: r.BeforeReserved, AfterReserved: r.AfterReserved,
 			CountedQuantity: r.CountedQuantity, Reference: r.Reference, Note: r.Note,
-			BatchID: r.BatchID, CreatedAt: r.CreatedAt,
+			BatchID: r.BatchID, OrderID: r.OrderID, CreatedAt: r.CreatedAt,
 		}
 		if r.CreatedBy != nil {
 			entry.CreatedBy = &Actor{ID: *r.CreatedBy, Name: r.CreatedByName}

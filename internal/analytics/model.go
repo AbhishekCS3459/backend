@@ -105,7 +105,7 @@ type Report struct {
 	StockSync   StockSync   `json:"stock_sync"`
 }
 
-// Sales are counter sales recorded in the store (online orders aren't taken yet).
+// Sales are counter sales recorded in the store and online orders picked up there.
 type Sales struct {
 	Revenue         float64 `json:"revenue"`
 	PreviousRevenue float64 `json:"previous_revenue"`

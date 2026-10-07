@@ -1,12 +1,16 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"net/url"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/AbhishekCS3459/find-me-backend/internal/payment"
 )
 
 // Config holds all application configuration loaded from environment variables
@@ -58,6 +62,21 @@ type Config struct {
 	MarketplaceDebug bool
 	// MarketplaceLiveMaxPerIP caps the live availability streams one client address holds open.
 	MarketplaceLiveMaxPerIP int
+
+	// Orders
+	// OrderPaymentHold: how long an online order holds stock while the customer pays.
+	OrderPaymentHold time.Duration
+	// OrderAcceptTimeout: how long a store has to accept before the order is rejected.
+	OrderAcceptTimeout time.Duration
+	// OrderPickupWindow: how long a ready order waits for the customer.
+	OrderPickupWindow time.Duration
+	// OrderPickupSecret derives pickup codes; defaults to one derived from JWT_SECRET.
+	OrderPickupSecret string
+	// OrderSweeperEnabled runs the deadline sweeper here. Safe on several instances at once.
+	OrderSweeperEnabled bool
+	OrderSweepInterval  time.Duration
+	// PaymentProvider names the payment gateway; only "dummy" exists so far.
+	PaymentProvider string
 
 	// Bootstrap admin (optional - created on startup if no admin exists)
 	BootstrapAdminEmail    string
@@ -127,6 +146,25 @@ func LoadConfig() (*Config, error) {
 		fmt.Fprintf(os.Stderr, "WARNING: DEBUG_MARKETPLACE is ignored in production\n")
 	}
 	cfg.MarketplaceLiveMaxPerIP = parseInt(getEnv("MARKETPLACE_LIVE_MAX_PER_IP", "30"), 30)
+
+	cfg.OrderPaymentHold = parseDuration(getEnv("ORDER_PAYMENT_HOLD", "10m"), 10*time.Minute)
+	cfg.OrderAcceptTimeout = parseDuration(getEnv("ORDER_ACCEPT_TIMEOUT", "15m"), 15*time.Minute)
+	cfg.OrderPickupWindow = parseDuration(getEnv("ORDER_PICKUP_WINDOW", "2h"), 2*time.Hour)
+	cfg.OrderPickupSecret = getEnv("ORDER_PICKUP_SECRET", "")
+	if cfg.OrderPickupSecret == "" {
+		sum := sha256.Sum256([]byte("order-pickup:" + cfg.JWTSecret))
+		cfg.OrderPickupSecret = hex.EncodeToString(sum[:])
+	}
+	cfg.OrderSweeperEnabled = getEnvBool("ORDER_SWEEPER_ENABLED", true)
+	cfg.OrderSweepInterval = parseDuration(getEnv("ORDER_SWEEP_INTERVAL", "30s"), 30*time.Second)
+	cfg.PaymentProvider = getEnv("PAYMENT_PROVIDER", payment.DummyName)
+	if cfg.PaymentProvider != payment.DummyName {
+		return nil, fmt.Errorf("PAYMENT_PROVIDER %q is not supported (only %q)", cfg.PaymentProvider, payment.DummyName)
+	}
+	if production {
+		fmt.Fprintf(os.Stderr, "WARNING: PAYMENT_PROVIDER is %q; online payments are simulated\n", payment.DummyName)
+	}
+
 	cfg.BootstrapAdminEmail = getEnv("BOOTSTRAP_ADMIN_EMAIL", "")
 	cfg.BootstrapAdminPassword = getEnv("BOOTSTRAP_ADMIN_PASSWORD", "")
 	cfg.BootstrapAdminPhone = getEnv("BOOTSTRAP_ADMIN_PHONE", "+10000000000")

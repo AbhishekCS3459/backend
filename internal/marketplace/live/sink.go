@@ -81,6 +81,7 @@ func updateFrom(m outbox.Message) (Update, bool) {
 		StoreID:            row.StoreID,
 		Price:              price,
 		AvailabilityBucket: string(row.Bucket),
+		MaxOrderQuantity:   availability.OrderableQuantity(row.AvailableQty),
 		Searchable:         row.Searchable,
 		LastStockUpdateAt:  row.LastStockUpdateAt,
 		Version:            row.Version,
